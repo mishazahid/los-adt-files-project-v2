@@ -163,4 +163,3 @@ class GoogleSheetsService:
         except Exception as e:
             logger.error(f"Error appending data to Sheets: {e}")
             return False
-
