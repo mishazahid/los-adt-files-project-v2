@@ -288,8 +288,6 @@ async function showResults(jobId, status) {
             driveLinks.innerHTML = '';
             const linksData = status.outputs.links;
             
-            console.log('Links data:', linksData); // Debug log
-            
             if (linksData.google_sheets) {
                 const link = document.createElement('a');
                 link.href = linksData.google_sheets;
@@ -300,7 +298,6 @@ async function showResults(jobId, status) {
             }
             
             if (linksData.generated_pdf) {
-                console.log('Found generated_pdf:', linksData.generated_pdf); // Debug log
                 // Check if it's a URL or just a message
                 if (linksData.generated_pdf.startsWith('http')) {
                     const linkContainer = document.createElement('div');
@@ -335,8 +332,6 @@ async function showResults(jobId, status) {
                     text.textContent = `📄 ${linksData.generated_pdf}`;
                     driveLinks.appendChild(text);
                 }
-            } else {
-                console.log('No generated_pdf in links'); // Debug log
             }
             
             if (linksData.google_slides) {
@@ -347,8 +342,6 @@ async function showResults(jobId, status) {
                 link.textContent = '📑 Google Slides';
                 driveLinks.appendChild(link);
             }
-        } else {
-            console.log('No outputs.links found in status:', status); // Debug log
         }
 
     } catch (error) {
