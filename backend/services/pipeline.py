@@ -1,0 +1,401 @@
+"""
+Pipeline Service - Orchestrates the entire processing pipeline
+"""
+
+import subprocess
+import os
+import sys
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any
+import asyncio
+import logging
+import concurrent.futures
+
+from backend.services.google_sheets import GoogleSheetsService
+from backend.services.google_slides import GoogleSlidesService
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class PipelineService:
+    """Service to orchestrate the full processing pipeline"""
+    
+    # Configuration for parallel processing
+    MAX_PARALLEL_WORKERS = 3  # Maximum number of files to process in parallel
+    
+    def __init__(self):
+        self.sheets_service = GoogleSheetsService()
+        self.slides_service = GoogleSlidesService()
+        
+        # Get script paths (assuming they're in the project root)
+        self.project_root = Path(__file__).parent.parent.parent
+        self.unified_script = self.project_root / "unified_pdf_to_csv_test.py"
+        self.los_script = self.project_root / "los-generate.py"
+        self.combiner_script = self.project_root / "csv_combiner-test.py"
+        self.summary_script = self.project_root / "summary_combiner.py"
+        
+        # Thread pool executor for running scripts (Windows compatible)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+    
+    async def run_pipeline(self, job_id: str, job_dir: str) -> Dict[str, Any]:
+        """
+        Run the complete processing pipeline
+        
+        Steps:
+        1-2. Run ADT and LOS processing in parallel (unified_pdf_to_csv_test.py, los-generate.py)
+        3. Run combiner (csv_combiner-test.py)
+        4. Run summary (summary_combiner.py)
+        5. Update Google Sheets
+        6. Generate Google Slides report
+        """
+        log_file = Path("logs") / f"{job_id}.log"
+        log_file.parent.mkdir(exist_ok=True)
+        
+        results = {
+            "job_id": job_id,
+            "steps_completed": [],
+            "outputs": {},
+            "links": {},
+            "errors": []
+        }
+        
+        try:
+            # Step 1 & 2: Process ADT and LOS files in parallel
+            adt_output_dir = Path("outputs") / job_id / "ADT-csv"
+            adt_output_dir.mkdir(parents=True, exist_ok=True)
+            los_output_dir = Path("outputs") / job_id / "LOS-csv"
+            los_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            adt_pdfs_dir = Path(job_dir) / "ADT"
+            los_pdfs_dir = Path(job_dir) / "LOS"
+            
+            has_adt = adt_pdfs_dir.exists() and list(adt_pdfs_dir.glob("*.pdf"))
+            has_los = los_pdfs_dir.exists() and list(los_pdfs_dir.glob("*.pdf"))
+            
+            async def process_adt():
+                """Process ADT files"""
+                await self._log(log_file, f"[{datetime.now()}] Step 1: Processing ADT files...")
+                if has_adt:
+                    await self._run_script(
+                        self.unified_script,
+                        [str(adt_pdfs_dir), "--output-dir", str(adt_output_dir), "--folder", "--parallel", "--max-workers", str(self.MAX_PARALLEL_WORKERS)],
+                        log_file
+                    )
+                    results["outputs"]["adt_csv"] = str(adt_output_dir)
+                    results["steps_completed"].append("adt_processing")
+                    await self._log(log_file, f"[{datetime.now()}] [OK] ADT processing complete")
+                return "adt_done"
+            
+            async def process_los():
+                """Process LOS files"""
+                await self._log(log_file, f"[{datetime.now()}] Step 2: Processing LOS files...")
+                if has_los:
+                    await self._run_script(
+                        self.los_script,
+                        [str(los_pdfs_dir), "--output-dir", str(los_output_dir), "--parallel", "--max-workers", str(self.MAX_PARALLEL_WORKERS)],
+                        log_file
+                    )
+                    results["outputs"]["los_csv"] = str(los_output_dir)
+                    results["steps_completed"].append("los_processing")
+                    await self._log(log_file, f"[{datetime.now()}] [OK] LOS processing complete")
+                return "los_done"
+            
+            # Run ADT and LOS processing in parallel
+            if has_adt and has_los:
+                await self._log(log_file, f"[{datetime.now()}] Processing ADT and LOS files in parallel...")
+                await asyncio.gather(process_adt(), process_los())
+            elif has_adt:
+                await process_adt()
+            elif has_los:
+                await process_los()
+            
+            # Step 3: Combine data
+            await self._log(log_file, f"[{datetime.now()}] Step 3: Combining data...")
+            combined_dir = Path("outputs") / job_id / "combined"
+            combined_dir.mkdir(parents=True, exist_ok=True)
+            
+            visits_dir = Path(job_dir) / "VISITS"
+            
+            # Normalize filenames first (as done in the notebook)
+            await self._normalize_filenames(adt_output_dir, log_file)
+            await self._normalize_filenames(los_output_dir, log_file)
+            
+            await self._run_script(
+                self.combiner_script,
+                [
+                    "--folders",
+                    str(adt_output_dir),
+                    str(los_output_dir),
+                    str(visits_dir),
+                    str(combined_dir)
+                ],
+                log_file
+            )
+            results["outputs"]["combined"] = str(combined_dir)
+            results["steps_completed"].append("combining")
+            await self._log(log_file, f"[{datetime.now()}] [OK] Data combination complete")
+            
+            # Normalize combined files
+            await self._normalize_filenames(combined_dir, log_file)
+            
+            # Step 4: Generate summaries
+            await self._log(log_file, f"[{datetime.now()}] Step 4: Generating summaries...")
+            summary_dir = Path("outputs") / job_id / "summary"
+            summary_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate all_patients.csv
+            await self._run_script(
+                self.summary_script,
+                [
+                    str(combined_dir),
+                    "--all-patients",
+                    str(summary_dir / "all_patients.csv"),
+                    "--add-metrics"
+                ],
+                log_file
+            )
+            
+            # Generate master_summary.csv
+            await self._run_script(
+                self.summary_script,
+                [
+                    str(combined_dir),
+                    str(summary_dir / "master_summary.csv"),
+                    "--add-metrics"
+                ],
+                log_file
+            )
+            
+            results["outputs"]["summary"] = str(summary_dir)
+            results["steps_completed"].append("summary")
+            await self._log(log_file, f"[{datetime.now()}] [OK] Summary generation complete")
+            
+            # Step 5: Update Google Sheets
+            await self._log(log_file, f"[{datetime.now()}] Step 5: Updating Google Sheets...")
+            master_summary_path = summary_dir / "master_summary.csv"
+            if master_summary_path.exists():
+                sheets_link = await self.sheets_service.update_sheets(master_summary_path)
+                results["links"]["google_sheets"] = sheets_link
+                results["steps_completed"].append("sheets_update")
+                await self._log(log_file, f"[{datetime.now()}] [OK] Google Sheets updated")
+            
+            # Step 6: Generate Google Slides report
+            await self._log(log_file, f"[{datetime.now()}] Step 6: Generating Google Slides report...")
+            slides_id = await self.slides_service.create_report(
+                job_id,
+                master_summary_path if master_summary_path.exists() else None,
+                summary_dir / "all_patients.csv" if (summary_dir / "all_patients.csv").exists() else None
+            )
+            
+            if slides_id:
+                results["links"]["google_slides"] = f"https://docs.google.com/presentation/d/{slides_id}"
+                results["steps_completed"].append("slides_creation")
+                await self._log(log_file, f"[{datetime.now()}] [OK] Google Slides report created (ID: {slides_id})")
+            else:
+                error_msg = "Google Slides report creation failed - no presentation ID returned"
+                await self._log(log_file, f"[{datetime.now()}] [WARNING] {error_msg}")
+                results["errors"].append(error_msg)
+                # Continue without slides - don't fail the entire pipeline
+            
+            await self._log(log_file, f"[{datetime.now()}] ===== PIPELINE COMPLETE =====")
+            
+        except Exception as e:
+            import traceback
+            error_msg = str(e) if str(e) else repr(e)
+            error_traceback = traceback.format_exc()
+            
+            # Log detailed error
+            await self._log(log_file, f"\n{'='*60}")
+            await self._log(log_file, f"[{datetime.now()}] ERROR OCCURRED!")
+            await self._log(log_file, f"Error Type: {type(e).__name__}")
+            await self._log(log_file, f"Error Message: {error_msg}")
+            await self._log(log_file, f"{'='*60}")
+            await self._log(log_file, "Full Traceback:")
+            # Write traceback line by line for better visibility
+            for line in error_traceback.split('\n'):
+                await self._log(log_file, line)
+            await self._log(log_file, f"{'='*60}\n")
+            
+            results["errors"].append(error_msg)
+            results["error_traceback"] = error_traceback
+            logger.error(f"Pipeline error for job {job_id}: {error_msg}", exc_info=True)
+            raise
+        
+        return results
+    
+    async def _run_script(self, script_path: Path, args: list, log_file: Path):
+        """Run a Python script and log output - Windows compatible"""
+        if not script_path.exists():
+            raise FileNotFoundError(f"Script not found: {script_path}")
+        
+        # Use absolute path to Python executable
+        python_exe = Path(sys.executable).resolve()
+        script_path_abs = script_path.resolve()
+        
+        await self._log(log_file, f"Python executable: {python_exe}")
+        
+        cmd = [str(python_exe), str(script_path_abs)] + [str(arg) if isinstance(arg, Path) else str(arg) for arg in args]
+        
+        await self._log(log_file, f"Running command: {' '.join(cmd)}")
+        await self._log(log_file, f"Working directory: {self.project_root}")
+        
+        def run_script_sync():
+            """Run script synchronously - Windows compatible"""
+            try:
+                # Prepare environment with current environment variables
+                env = os.environ.copy()
+                
+                # Ensure PATH includes venv Scripts directory for DLL dependencies
+                venv_scripts = self.project_root / "venv" / "Scripts"
+                if venv_scripts.exists():
+                    current_path = env.get('PATH', '')
+                    venv_path = str(venv_scripts)
+                    if venv_path not in current_path:
+                        env['PATH'] = f"{venv_path};{current_path}"
+                
+                # On Windows, use shell=True to help with DLL loading
+                if os.name == 'nt':  # Windows
+                    # Format command properly for Windows cmd.exe - quote paths with spaces
+                    def quote_arg(arg):
+                        arg_str = str(arg)
+                        if ' ' in arg_str or arg_str.startswith('-'):
+                            return f'"{arg_str}"'
+                        return arg_str
+                    shell_cmd = ' '.join(quote_arg(arg) for arg in cmd)
+                    result = subprocess.run(
+                        shell_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=str(self.project_root.resolve()),
+                        env=env,
+                        shell=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=3600
+                    )
+                else:
+                    # On Unix-like systems, use list format without shell
+                    result = subprocess.run(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=str(self.project_root.resolve()),
+                        env=env,
+                        shell=False,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=3600
+                    )
+                return result.returncode, result.stdout, result.stderr
+            except subprocess.TimeoutExpired:
+                return -1, "", "Script execution timed out after 1 hour"
+            except Exception as e:
+                return -1, "", f"Error running script: {str(e)}"
+        
+        try:
+            # Run in thread executor to avoid blocking and Windows asyncio issues
+            loop = asyncio.get_event_loop()
+            returncode, stdout_text, stderr_text = await loop.run_in_executor(
+                self.executor, run_script_sync
+            )
+            
+            # Split output into lines and log
+            stdout_lines = stdout_text.split('\n') if stdout_text else []
+            stderr_lines = stderr_text.split('\n') if stderr_text else []
+            
+            # Log all output (with error handling)
+            try:
+                for line in stdout_lines:
+                    if line.strip():
+                        await self._log(log_file, line)
+                
+                for line in stderr_lines:
+                    if line.strip():
+                        await self._log(log_file, f"[STDERR] {line}")
+            except Exception as log_error:
+                await self._log(log_file, f"[WARNING] Error while logging output: {log_error}")
+            
+            if returncode != 0:
+                # Convert Windows error codes to readable messages
+                error_code_msg = ""
+                if returncode == 3221225794 or returncode == -1073741515:  # 0xC0000135
+                    error_code_msg = "\n[WINDOWS ERROR] DLL initialization failed or missing dependency."
+                    error_code_msg += "\nThis usually means:"
+                    error_code_msg += "\n1. Missing Visual C++ Redistributable"
+                    error_code_msg += "\n2. Corrupted Python installation"
+                    error_code_msg += "\n3. Virtual environment issues"
+                    error_code_msg += "\nFix: Install Visual C++ Redistributable from: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+                    error_code_msg += f"\nPython executable: {sys.executable}"
+                    error_code_msg += f"\nTry running manually: {' '.join(cmd)}"
+                    
+                    # Log the error message before raising
+                    try:
+                        await self._log(log_file, error_code_msg)
+                    except:
+                        pass  # If logging fails, continue anyway
+                
+                error_msg = f"Script failed with return code {returncode}"
+                if error_code_msg:
+                    error_msg += error_code_msg
+                
+                if stderr_lines:
+                    last_stderr = [l.strip() for l in stderr_lines if l.strip()][-20:]
+                    if last_stderr:
+                        error_msg += f"\n\nSTDERR (last 20 lines):\n" + "\n".join(last_stderr)
+                    else:
+                        error_msg += f"\n\nNo STDERR output captured (script may have crashed immediately)"
+                
+                if stdout_lines:
+                    last_stdout = [l.strip() for l in stdout_lines if l.strip()][-20:]
+                    if last_stdout:
+                        error_msg += f"\n\nSTDOUT (last 20 lines):\n" + "\n".join(last_stdout)
+                    else:
+                        error_msg += f"\n\nNo STDOUT output captured (script may have crashed immediately)"
+                
+                # Add command info for debugging
+                error_msg += f"\n\nCommand that failed: {' '.join(cmd)}"
+                error_msg += f"\nWorking directory: {self.project_root}"
+                error_msg += f"\nPython executable: {sys.executable}"
+                
+                # Log the complete error message before raising
+                try:
+                    await self._log(log_file, f"\n{'='*70}")
+                    await self._log(log_file, "SCRIPT EXECUTION FAILED")
+                    await self._log(log_file, f"{'='*70}")
+                    await self._log(log_file, error_msg)
+                    await self._log(log_file, f"{'='*70}\n")
+                except Exception as log_err:
+                    # If logging fails, at least print it
+                    print(f"Error logging failed: {log_err}")
+                    print(error_msg)
+                
+                raise RuntimeError(error_msg)
+                
+        except Exception as e:
+            await self._log(log_file, f"Exception running script: {type(e).__name__}: {str(e)}")
+            import traceback
+            await self._log(log_file, traceback.format_exc())
+            raise
+    
+    async def _normalize_filenames(self, directory: Path, log_file: Path):
+        """Normalize filenames to lowercase underscore style"""
+        import re
+        for file_path in directory.glob("*"):
+            if file_path.is_file():
+                new_name = re.sub(r'[^a-z0-9_.]+', '_', file_path.stem.lower()) + file_path.suffix.lower()
+                if new_name != file_path.name:
+                    new_path = file_path.parent / new_name
+                    file_path.rename(new_path)
+                    await self._log(log_file, f"Renamed: {file_path.name} → {new_name}")
+    
+    async def _log(self, log_file: Path, message: str):
+        """Append message to log file"""
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(message + "\n")
+            f.flush()
