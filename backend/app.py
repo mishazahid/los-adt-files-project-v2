@@ -1,8 +1,3 @@
-"""
-FastAPI Backend for Facility Report Generator
-Handles file uploads, processing pipeline, and report generation
-"""
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -99,4 +94,3 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
-
