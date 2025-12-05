@@ -3,17 +3,13 @@ FastAPI Backend for Facility Report Generator
 Handles file uploads, processing pipeline, and report generation
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import uvicorn
-import os
-import json
 from datetime import datetime
-from typing import List, Optional
-import uuid
 
 from backend.routes import upload, status, download
 from backend.config import job_status, UPLOAD_DIR, OUTPUT_DIR, LOGS_DIR
