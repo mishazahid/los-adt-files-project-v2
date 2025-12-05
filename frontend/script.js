@@ -288,6 +288,8 @@ async function showResults(jobId, status) {
             driveLinks.innerHTML = '';
             const linksData = status.outputs.links;
             
+            console.log('Links data:', linksData); // Debug log
+            
             if (linksData.google_sheets) {
                 const link = document.createElement('a');
                 link.href = linksData.google_sheets;
@@ -295,6 +297,46 @@ async function showResults(jobId, status) {
                 link.className = 'drive-link';
                 link.textContent = '📊 Google Sheets';
                 driveLinks.appendChild(link);
+            }
+            
+            if (linksData.generated_pdf) {
+                console.log('Found generated_pdf:', linksData.generated_pdf); // Debug log
+                // Check if it's a URL or just a message
+                if (linksData.generated_pdf.startsWith('http')) {
+                    const linkContainer = document.createElement('div');
+                    linkContainer.className = 'drive-link-container';
+                    linkContainer.style.marginBottom = '10px';
+                    
+                    const link = document.createElement('a');
+                    link.href = linksData.generated_pdf;
+                    link.target = '_blank';
+                    link.className = 'drive-link';
+                    link.textContent = '📄 View PDF on Google Drive';
+                    link.style.display = 'block';
+                    link.style.marginBottom = '5px';
+                    
+                    // Add the actual URL as a smaller text below
+                    const urlText = document.createElement('span');
+                    urlText.className = 'drive-url';
+                    urlText.style.fontSize = '0.85em';
+                    urlText.style.color = '#666';
+                    urlText.style.wordBreak = 'break-all';
+                    urlText.textContent = linksData.generated_pdf;
+                    
+                    linkContainer.appendChild(link);
+                    linkContainer.appendChild(urlText);
+                    driveLinks.appendChild(linkContainer);
+                } else {
+                    // If it's just a message, show it as text with a note
+                    const text = document.createElement('span');
+                    text.className = 'drive-link';
+                    text.style.display = 'block';
+                    text.style.marginTop = '10px';
+                    text.textContent = `📄 ${linksData.generated_pdf}`;
+                    driveLinks.appendChild(text);
+                }
+            } else {
+                console.log('No generated_pdf in links'); // Debug log
             }
             
             if (linksData.google_slides) {
@@ -305,6 +347,8 @@ async function showResults(jobId, status) {
                 link.textContent = '📑 Google Slides';
                 driveLinks.appendChild(link);
             }
+        } else {
+            console.log('No outputs.links found in status:', status); // Debug log
         }
 
     } catch (error) {
