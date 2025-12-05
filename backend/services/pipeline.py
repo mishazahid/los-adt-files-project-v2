@@ -5,6 +5,7 @@ Pipeline Service - Orchestrates the entire processing pipeline
 import subprocess
 import os
 import sys
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any
@@ -194,7 +195,6 @@ class PipelineService:
                 pdf_link = None
                 
                 # Log the full response for debugging
-                import json
                 await self._log(log_file, f"[{datetime.now()}] Apps Script response: {json.dumps(result_data, indent=2)}")
                 
                 # Check various possible fields for PDF link
