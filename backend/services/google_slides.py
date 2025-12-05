@@ -32,6 +32,8 @@ class GoogleSlidesService:
             
             # Try to get credentials from environment variable first (for cloud deployments)
             credentials_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+            credentials = None
+            
             if credentials_json:
                 try:
                     # Parse JSON string from environment variable
@@ -43,25 +45,36 @@ class GoogleSlidesService:
                     logger.info("Google Slides service initialized from GOOGLE_CREDENTIALS_JSON")
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse GOOGLE_CREDENTIALS_JSON: {e}")
+                    logger.error(f"JSON content (first 100 chars): {credentials_json[:100] if credentials_json else 'None'}")
                     credentials = None
-            else:
-                # Fall back to file path
+                except Exception as e:
+                    logger.error(f"Error creating credentials from GOOGLE_CREDENTIALS_JSON: {e}")
+                    credentials = None
+            
+            # Fall back to file path if JSON not available or failed
+            if not credentials:
                 credentials_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
                 
                 if not os.path.exists(credentials_path):
                     logger.warning(f"Google credentials not found at {credentials_path}. Slides features will be disabled.")
+                    logger.warning(f"GOOGLE_CREDENTIALS_JSON was: {'SET' if credentials_json else 'NOT SET'}")
                     return
                 
-                credentials = service_account.Credentials.from_service_account_file(
-                    credentials_path,
-                    scopes=SCOPES
-                )
-                logger.info(f"Google Slides service initialized from file: {credentials_path}")
+                try:
+                    credentials = service_account.Credentials.from_service_account_file(
+                        credentials_path,
+                        scopes=SCOPES
+                    )
+                    logger.info(f"Google Slides service initialized from file: {credentials_path}")
+                except Exception as e:
+                    logger.error(f"Error loading credentials from file {credentials_path}: {e}")
+                    return
             
             if credentials:
                 self.service = build('slides', 'v1', credentials=credentials)
                 logger.info("Google Slides service initialized successfully")
             else:
+                logger.error("Failed to load credentials - both JSON and file methods failed")
                 raise ValueError("Failed to load credentials")
         
         except Exception as e:
