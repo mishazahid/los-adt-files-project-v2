@@ -173,4 +173,3 @@ async def process_job(job_id: str, job_dir: str):
         job_status[job_id]["progress"] = 0
         print(f"ERROR in job {job_id}: {error_msg}")
         print(error_traceback)
-
