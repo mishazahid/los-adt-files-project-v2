@@ -73,7 +73,8 @@ async def health_check():
         "services": {
             "pipeline": "ready",
             "google_sheets": "ready",
-            "google_slides": "ready"
+            "google_slides": "ready",
+            "google_apps_script": "ready"
         }
     }
 
