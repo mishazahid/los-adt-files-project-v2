@@ -14,6 +14,7 @@ import concurrent.futures
 
 from backend.services.google_sheets import GoogleSheetsService
 from backend.services.google_slides import GoogleSlidesService
+from backend.services.google_apps_script import GoogleAppsScriptService
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,7 @@ class PipelineService:
     def __init__(self):
         self.sheets_service = GoogleSheetsService()
         self.slides_service = GoogleSlidesService()
+        self.apps_script_service = GoogleAppsScriptService()
         
         # Get script paths (assuming they're in the project root)
         self.project_root = Path(__file__).parent.parent.parent
@@ -182,8 +184,58 @@ class PipelineService:
                 results["steps_completed"].append("sheets_update")
                 await self._log(log_file, f"[{datetime.now()}] [OK] Google Sheets updated")
             
-            # Step 6: Generate Google Slides report
-            await self._log(log_file, f"[{datetime.now()}] Step 6: Generating Google Slides report...")
+            # Step 6: Generate PDF using Apps Script
+            await self._log(log_file, f"[{datetime.now()}] Step 6: Generating PDF via Apps Script...")
+            pdf_result = await self.apps_script_service.generate_pdf()
+            if pdf_result.get("success"):
+                results["steps_completed"].append("pdf_generation")
+                # Extract PDF link from result if available
+                result_data = pdf_result.get("result", {})
+                pdf_link = None
+                
+                # Log the full response for debugging
+                import json
+                await self._log(log_file, f"[{datetime.now()}] Apps Script response: {json.dumps(result_data, indent=2)}")
+                
+                # Check various possible fields for PDF link
+                if isinstance(result_data, dict):
+                    pdf_link = (
+                        result_data.get("pdf_link") or 
+                        result_data.get("pdfLink") or 
+                        result_data.get("url") or
+                        result_data.get("fileUrl") or
+                        result_data.get("pdf_url") or
+                        result_data.get("pdfUrl")
+                    )
+                    
+                    # If we have a file ID, construct the Drive link
+                    if not pdf_link:
+                        file_id = (
+                            result_data.get("file_id") or 
+                            result_data.get("fileId") or 
+                            result_data.get("id") or
+                            result_data.get("fileID")
+                        )
+                        if file_id:
+                            pdf_link = f"https://drive.google.com/file/d/{file_id}/view"
+                
+                if pdf_link:
+                    results["links"]["generated_pdf"] = pdf_link
+                    await self._log(log_file, f"[{datetime.now()}] [OK] PDF generated via Apps Script: {pdf_link}")
+                else:
+                    # Use the default Google Drive folder link as fallback
+                    default_drive_folder = "https://drive.google.com/drive/folders/1DOThKA_GrOHzDZomzjOxnYfzCjVNWCql?usp=drive_link"
+                    results["links"]["generated_pdf"] = default_drive_folder
+                    await self._log(log_file, f"[{datetime.now()}] [OK] PDF generated via Apps Script (using default Drive folder link)")
+                    await self._log(log_file, f"[{datetime.now()}] [DEBUG] Response keys: {list(result_data.keys()) if isinstance(result_data, dict) else 'Not a dict'}")
+            else:
+                error_msg = pdf_result.get("error", "Unknown error")
+                await self._log(log_file, f"[{datetime.now()}] [WARNING] PDF generation failed: {error_msg}")
+                results["errors"].append(f"PDF generation: {error_msg}")
+                # Continue without PDF - don't fail the entire pipeline
+            
+            # Step 7: Generate Google Slides report
+            await self._log(log_file, f"[{datetime.now()}] Step 7: Generating Google Slides report...")
             slides_id = await self.slides_service.create_report(
                 job_id,
                 master_summary_path if master_summary_path.exists() else None,
