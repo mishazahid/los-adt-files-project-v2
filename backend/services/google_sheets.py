@@ -103,6 +103,9 @@ class GoogleSheetsService:
             return ""
         
         try:
+            # Work on a copy so we don't mutate caller's dict (e.g., _quarter key)
+            facility_values = dict(facility_values) if facility_values else {}
+            
             # Read CSV file
             df = pd.read_csv(csv_file)
             
@@ -121,6 +124,11 @@ class GoogleSheetsService:
                     df['PPS'] = ''
                 if 'INC' not in df.columns:
                     df['INC'] = ''
+                
+                # Explicitly reset values to avoid stale data when facility count shrinks
+                df['GS'] = ''
+                df['PPS'] = ''
+                df['INC'] = ''
                 
                 # Populate GS, PPS, INC values for each facility
                 if 'Facility' in df.columns:
@@ -146,7 +154,13 @@ class GoogleSheetsService:
             values.extend(df.values.tolist())
             
             # Clear existing data
-            range_name = f"{self.sheet_tab}!A:Z"
+            # 1) Hard-clear GS/PPS/INC columns to avoid stale data even if new payload is smaller
+            self.sheets_service.values().batchClear(
+                spreadsheetId=self.sheet_id,
+                body={"ranges": [f"{self.sheet_tab}!AA:AC"]}
+            ).execute()
+            # 2) Clear main data range to remove extra rows
+            range_name = f"{self.sheet_tab}!A1:Z10000"
             self.sheets_service.values().clear(
                 spreadsheetId=self.sheet_id,
                 range=range_name
