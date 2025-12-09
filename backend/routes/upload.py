@@ -1,7 +1,3 @@
-"""
-Upload routes for handling file uploads
-"""
-
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form
 from pathlib import Path
 import os
