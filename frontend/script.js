@@ -107,6 +107,135 @@ function updateFileInput(input, files) {
 function checkUploadButton() {
     const hasFiles = adtFiles.length > 0 || losFiles.length > 0 || visitFiles.length > 0;
     uploadBtn.disabled = !hasFiles;
+    
+    // Detect facilities and show input section
+    if (hasFiles) {
+        detectFacilitiesAndShowInputs();
+    } else {
+        document.getElementById('facilityInputsSection').style.display = 'none';
+    }
+}
+
+function detectFacilitiesAndShowInputs() {
+    const facilities = new Set();
+    const facilityMap = new Map(); // Map normalized name to display name
+    
+    // Only extract facility names from ADT files (not LOS files)
+    adtFiles.forEach(file => {
+        const name = file.name.toLowerCase();
+        let facilityName = null;
+        
+        // Common patterns: "ADT Medilodge of Holland Q3.pdf", etc.
+        if (name.includes('holland')) {
+            facilityName = 'Medilodge of Holland';
+        } else if (name.includes('farmington')) {
+            facilityName = 'Medilodge of Farmington';
+        } else if (name.includes('wyoming')) {
+            facilityName = 'Medilodge of Wyoming';
+        } else if (name.includes('sterling')) {
+            facilityName = 'Medilodge of Sterling Heights';
+        } else if (name.includes('shore')) {
+            facilityName = 'Medilodge at the Shore';
+        } else if (name.includes('sault')) {
+            facilityName = 'Medilodge of Sault St. Marie';
+        } else if (name.includes('clare')) {
+            facilityName = 'Medilodge of Clare';
+        } else if (name.includes('ludington')) {
+            facilityName = 'Medilodge of Ludington';
+        } else if (name.includes('pleasant')) {
+            facilityName = 'Medilodge of Mt. Pleasant';
+        } else if (name.includes('grand rapids')) {
+            facilityName = 'Medilodge of Grand Rapids';
+        } else {
+            // Generic pattern: extract from "ADT Medilodge of X Q3.pdf"
+            const medilodgeMatch = name.match(/medilodge\s+(?:of\s+)?([^.\s]+(?:\s+[^.\s]+)*?)(?:\s+q\d+|\s*$)/i);
+            if (medilodgeMatch) {
+                const facilityPart = medilodgeMatch[1].trim();
+                facilityName = 'Medilodge of ' + facilityPart.split(/\s+/).map(w => 
+                    w.charAt(0).toUpperCase() + w.slice(1)
+                ).join(' ');
+            }
+        }
+        
+        if (facilityName) {
+            // Normalize facility name (remove Q3, Q2, etc. and use base name)
+            const normalized = facilityName.replace(/\s+Q\d+\s*$/i, '').trim();
+            
+            // Use normalized name as key, but keep the cleanest display name
+            if (!facilityMap.has(normalized)) {
+                facilityMap.set(normalized, normalized);
+            }
+        }
+    });
+    
+    // Add all unique facilities
+    facilityMap.forEach((displayName) => {
+        facilities.add(displayName);
+    });
+    
+    // If no facilities detected from ADT files, but we have ADT files, show generic inputs
+    if (facilities.size === 0 && adtFiles.length > 0) {
+        facilities.add('Facility 1');
+    }
+    
+    createFacilityInputs(Array.from(facilities).sort());
+}
+
+function createFacilityInputs(facilities) {
+    const container = document.getElementById('facilityInputsContainer');
+    container.innerHTML = '';
+    
+    facilities.forEach((facility, index) => {
+        const facilityDiv = document.createElement('div');
+        facilityDiv.className = 'facility-input-group';
+        facilityDiv.innerHTML = `
+            <label class="facility-label">${facility}</label>
+            <div class="facility-inputs-row">
+                <div class="input-group">
+                    <label class="input-label">Global Score Value</label>
+                    <input type="text" class="facility-value-input" data-facility="${facility}" data-field="gs" placeholder="Enter value">
+                </div>
+                <div class="input-group">
+                    <label class="input-label">End of PPS Mean</label>
+                    <input type="text" class="facility-value-input" data-facility="${facility}" data-field="pps" placeholder="Enter value">
+                </div>
+                <div class="input-group">
+                    <label class="input-label">Increase in Score</label>
+                    <input type="text" class="facility-value-input" data-facility="${facility}" data-field="inc" placeholder="Enter value">
+                </div>
+            </div>
+        `;
+        container.appendChild(facilityDiv);
+    });
+    
+    document.getElementById('facilityInputsSection').style.display = 'block';
+}
+
+function getFacilityValues() {
+    const values = {};
+    const inputs = document.querySelectorAll('.facility-value-input');
+    
+    inputs.forEach(input => {
+        const facility = input.dataset.facility;
+        const field = input.dataset.field;
+        const value = input.value.trim();
+        
+        if (!values[facility]) {
+            values[facility] = {};
+        }
+        
+        if (value) {
+            values[facility][field.toUpperCase()] = value;
+        }
+    });
+    
+    // Get quarter value (single value for all facilities)
+    const quarterInput = document.getElementById('quarterInput');
+    if (quarterInput && quarterInput.value.trim()) {
+        values['_quarter'] = quarterInput.value.trim();
+    }
+    
+    return values;
 }
 
 async function handleUpload() {
@@ -129,6 +258,12 @@ async function handleUpload() {
     visitFiles.forEach(file => {
         formData.append('visit_files', file);
     });
+    
+    // Add facility values (GS, PPS, INC for each facility)
+    const facilityValues = getFacilityValues();
+    if (Object.keys(facilityValues).length > 0) {
+        formData.append('facility_values', JSON.stringify(facilityValues));
+    }
 
     // Show processing section
     processingSection.style.display = 'block';
