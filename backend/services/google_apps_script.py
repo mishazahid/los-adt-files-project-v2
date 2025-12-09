@@ -237,4 +237,3 @@ class GoogleAppsScriptService:
             Dictionary with success status
         """
         return await self.execute_function('generateExecutiveSummarySlide')
-
