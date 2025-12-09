@@ -34,14 +34,21 @@ async def list_outputs(job_id: str):
     
     if output_dir.exists():
         for file_path in output_dir.rglob("*"):
-            if file_path.is_file():
-                relative_path = file_path.relative_to(output_dir)
-                files.append({
-                    "name": file_path.name,
-                    "path": str(relative_path),
-                    "size": file_path.stat().st_size,
-                    "url": f"/api/download/{job_id}/file/{relative_path.as_posix()}"
-                })
+            if not file_path.is_file():
+                continue
+            # Skip raw text diagnostics files (e.g., extracted_text.txt)
+            if file_path.suffix.lower() == ".txt":
+                continue
+            # Only show all_patients.csv files
+            if file_path.name != "all_patients.csv":
+                continue
+            relative_path = file_path.relative_to(output_dir)
+            files.append({
+                "name": file_path.name,
+                "path": str(relative_path),
+                "size": file_path.stat().st_size,
+                "url": f"/api/download/{job_id}/file/{relative_path.as_posix()}"
+            })
     
     return {
         "job_id": job_id,
