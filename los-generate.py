@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+Unified GPT OCR to CSV Converter
+Combines PDF OCR extraction, name separation, and CSV conversion into one script
+"""
+
 import fitz  # PyMuPDF
 import base64
 import json
