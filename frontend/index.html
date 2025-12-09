@@ -49,6 +49,22 @@
                 </div>
             </div>
 
+            <div id="facilityInputsSection" class="facility-inputs-section" style="display: none;">
+                <h3>📋 Facility Values (GS, PPS, INC, Quarter)</h3>
+                <p class="category-desc">Enter values for each facility. These will be added to Google Sheets.</p>
+                
+                <div id="quarterInputContainer" class="quarter-input-container">
+                    <div class="quarter-input-group">
+                        <label class="quarter-label">Quarter (applies to all facilities)</label>
+                        <input type="text" id="quarterInput" class="quarter-value-input" placeholder="e.g., Q3 2025" maxlength="20">
+                    </div>
+                </div>
+                
+                <div id="facilityInputsContainer" class="facility-inputs-container">
+                    <!-- Dynamic facility inputs will be added here -->
+                </div>
+            </div>
+
             <button id="uploadBtn" class="upload-btn" disabled>
                 <span class="btn-text">Upload & Process Files</span>
                 <span class="btn-spinner" style="display: none;">⏳</span>
