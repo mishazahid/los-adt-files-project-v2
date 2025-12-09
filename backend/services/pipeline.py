@@ -180,7 +180,10 @@ class PipelineService:
             await self._log(log_file, f"[{datetime.now()}] Step 5: Updating Google Sheets...")
             master_summary_path = summary_dir / "master_summary.csv"
             if master_summary_path.exists():
-                sheets_link = await self.sheets_service.update_sheets(master_summary_path)
+                # Get facility values from job status if available
+                from backend.config import job_status
+                facility_values = job_status.get(job_id, {}).get("facility_values", {})
+                sheets_link = await self.sheets_service.update_sheets(master_summary_path, facility_values)
                 results["links"]["google_sheets"] = sheets_link
                 results["steps_completed"].append("sheets_update")
                 await self._log(log_file, f"[{datetime.now()}] [OK] Google Sheets updated")
