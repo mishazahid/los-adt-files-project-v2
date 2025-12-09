@@ -12,9 +12,11 @@ from typing import List, Optional
 
 from backend.services.pipeline import PipelineService
 from backend.config import job_status, UPLOAD_DIR, OUTPUT_DIR, LOGS_DIR
+import logging
 
 router = APIRouter()
 pipeline_service = PipelineService()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/files")
@@ -22,7 +24,8 @@ async def upload_files(
     background_tasks: BackgroundTasks,
     adt_files: Optional[List[UploadFile]] = File(None),
     los_files: Optional[List[UploadFile]] = File(None),
-    visit_files: Optional[List[UploadFile]] = File(None)
+    visit_files: Optional[List[UploadFile]] = File(None),
+    facility_values: Optional[str] = Form(None)
 ):
     """
     Upload files for processing
@@ -99,6 +102,19 @@ async def upload_files(
             job_status[job_id]["message"] = "No files were uploaded"
             raise HTTPException(status_code=400, detail="No files were uploaded")
         
+        # Parse facility values if provided
+        facility_values_dict = {}
+        if facility_values:
+            try:
+                import json
+                facility_values_dict = json.loads(facility_values)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse facility_values: {facility_values}")
+        
+        # Store facility values in job status
+        if facility_values_dict:
+            job_status[job_id]["facility_values"] = facility_values_dict
+        
         # Update job status
         job_status[job_id]["status"] = "uploaded"
         job_status[job_id]["progress"] = 10
@@ -173,3 +189,4 @@ async def process_job(job_id: str, job_dir: str):
         job_status[job_id]["progress"] = 0
         print(f"ERROR in job {job_id}: {error_msg}")
         print(error_traceback)
+
