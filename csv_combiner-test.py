@@ -7,18 +7,21 @@ This script combines CSV files in two modes:
 1. INDIVIDUAL FILE MODE: Combines three specific CSV files:
    - ADT cycles data (with patient admission/discharge/transfer information)
    - Patient data (with payer type and length of stay)
-   - Visit data (with patient visit counts)
+   - Visit data (with patient visit counts) - can be a single file or folder containing multiple files
 
 2. FOLDER MODE: Processes folders containing multiple CSV files and matches
    ADT files with corresponding patient files based on facility names, using
-   a single Change Capture file for all combinations.
+   a Change Capture folder/file for all combinations.
 
 The script merges these files on patient names and outputs combined CSV files
 with comprehensive healthcare facility metrics.
 
+If a folder is provided for visit data and it contains multiple files, all files
+will be combined into a single DataFrame using column names (concatenated vertically).
+
 Usage:
     # Individual file processing:
-    python csv_combiner.py <adt_file> <patient_file> <visit_file> <output_file>
+    python csv_combiner.py <adt_file> <patient_file> <visit_file_or_folder> <output_file>
 
     # Folder batch processing:
     python csv_combiner.py --folders <adt_folder> <patient_folder> <visit_folder> <output_folder>
@@ -26,11 +29,12 @@ Usage:
 Examples:
     # Process individual files:
     python csv_combiner.py ADT-Example_cycles.csv Medilodge_of_Farmington.csv Change_Capture.csv output.csv
+    python csv_combiner.py ADT-Example_cycles.csv Medilodge_of_Farmington.csv change-capture/ output.csv
     
     # Process folders with name matching:
     # ADT files: ADT Medilodge at the Shore_cycles.csv, ADT Medilodge Sterling Heights_cycles.csv
     # Patient files: Medilodge_at_the_Shore.csv, Medilodge_of_Sterling_Heights.csv  
-    # Visit file: Change_Capture.csv (same for all)
+    # Visit folder: change-capture/ (contains multiple Change Capture files that will be combined)
     python csv_combiner.py --folders adt_folder/ patient_folder/ visit_folder/ output_folder/
     python csv_combiner.py --folders adt_folder/ patient_folder/ visit_folder/ output_folder/ --facility-name "Medilodge Facility"
 """
@@ -51,6 +55,11 @@ def load_csv_file(file_path, description):
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"{description} file not found: {file_path}")
         
+        # Check if path is a directory (common mistake)
+        if os.path.isdir(file_path):
+            raise ValueError(f"{description} path is a directory, not a file: {file_path}\n"
+                           f"  Hint: Did you mean to use --folders mode instead? Or specify a file path within the directory?")
+        
         # Try to read as CSV first
         try:
             df = pd.read_csv(file_path)
@@ -67,6 +76,130 @@ def load_csv_file(file_path, description):
     except Exception as e:
         print(f"[FAILED] Error loading {description} file: {e}")
         sys.exit(1)
+
+
+def load_visit_files_from_folder(folder_path, description):
+    """
+    Load and combine all CSV/Excel files from a folder into a single DataFrame.
+    
+    Args:
+        folder_path: Path to folder containing visit/change capture files, or path to a single file
+        description: Description for logging purposes
+    
+    Returns:
+        Combined DataFrame with all files concatenated
+    """
+    path = Path(folder_path)
+    
+    # If it's a file, just load it normally
+    if path.is_file():
+        return load_csv_file(str(path), description)
+    
+    # If it's a folder, find all CSV/Excel files and combine them
+    if not path.is_dir():
+        raise FileNotFoundError(f"{description} path not found: {folder_path}")
+    
+    print(f"\n--- Loading {description} from folder ---")
+    print(f"Searching in: {folder_path}")
+    
+    # Find all CSV and Excel files in the folder (including subdirectories)
+    # Use rglob to search recursively (includes current directory)
+    csv_files = list(path.rglob("*.csv"))
+    excel_files = list(path.rglob("*.xlsx")) + list(path.rglob("*.xls"))
+    
+    # Remove duplicates and sort
+    all_files = sorted(list(set(csv_files + excel_files)))
+    
+    if not all_files:
+        raise FileNotFoundError(f"No CSV or Excel files found in {description} folder: {folder_path}")
+    
+    print(f"Found {len(all_files)} file(s):")
+    for f in all_files:
+        print(f"  - {f.name}")
+    
+    # Load and combine all files
+    dataframes = []
+    total_rows = 0
+    
+    for file_path in all_files:
+        try:
+            # Try CSV first
+            try:
+                df = pd.read_csv(file_path)
+            except Exception:
+                # If CSV fails, try Excel
+                try:
+                    df = pd.read_excel(file_path)
+                except Exception as e:
+                    print(f"  ⚠ Warning: Could not read {file_path.name}: {e}")
+                    continue
+            
+            dataframes.append(df)
+            total_rows += len(df)
+            print(f"  [OK] Loaded {file_path.name}: {len(df)} rows, {len(df.columns)} columns")
+            
+        except Exception as e:
+            print(f"  [FAILED] Error loading {file_path.name}: {e}")
+            continue
+    
+    if not dataframes:
+        raise ValueError(f"Could not load any files from {description} folder: {folder_path}")
+    
+    # Combine all dataframes using column names (concatenate vertically)
+    print(f"\n--- Combining {len(dataframes)} file(s) ---")
+    
+    # Standardize column names to handle case-insensitive matching
+    standardized_dfs = []
+    for df in dataframes:
+        # Create a mapping to standardize column names (lowercase for comparison)
+        col_mapping = {}
+        seen_cols = {}
+        
+        for col in df.columns:
+            col_lower = col.lower()
+            # If we've seen this column name before (case-insensitive), use the first version
+            if col_lower in seen_cols:
+                col_mapping[col] = seen_cols[col_lower]
+            else:
+                seen_cols[col_lower] = col
+                col_mapping[col] = col
+        
+        df_standardized = df.rename(columns=col_mapping)
+        standardized_dfs.append(df_standardized)
+    
+    # Get all unique column names across all dataframes
+    all_columns = set()
+    for df in standardized_dfs:
+        all_columns.update(df.columns)
+    
+    # Sort columns for consistent ordering (use first dataframe's order as base, then add any extras)
+    if standardized_dfs:
+        base_columns = list(standardized_dfs[0].columns)
+        extra_columns = sorted([col for col in all_columns if col not in base_columns])
+        column_order = base_columns + extra_columns
+    else:
+        column_order = sorted(list(all_columns))
+    
+    # Align columns for all dataframes (add missing columns as NaN and reorder)
+    aligned_dfs = []
+    for df in standardized_dfs:
+        # Add missing columns with None values
+        for col in column_order:
+            if col not in df.columns:
+                df[col] = None
+        # Reorder columns to match column_order
+        df = df[column_order]
+        aligned_dfs.append(df)
+    
+    # Concatenate all dataframes
+    combined_df = pd.concat(aligned_dfs, ignore_index=True)
+    
+    print(f"[OK] Combined {len(dataframes)} file(s) into single DataFrame")
+    print(f"  Total rows: {len(combined_df)} (sum of parts: {total_rows})")
+    print(f"  Total columns: {len(combined_df.columns)}")
+    print(f"  Columns: {list(combined_df.columns)}")
+    
+    return combined_df
 
 
 def validate_required_columns(df, required_cols, file_description):
@@ -198,6 +331,15 @@ def merge_dataframes(adt_df, patient_df, visit_counts):
     # Add Puzzle Patient column based on visit count
     merged_df_with_visits['Puzzle Patient'] = merged_df_with_visits['Number of Visits by Puzzle Provider'] > 0
     
+    # Fill blank to_type values with 'Custodial'
+    if 'to_type' in merged_df_with_visits.columns:
+        # Fill NaN and empty string values with 'Custodial'
+        merged_df_with_visits['to_type'] = merged_df_with_visits['to_type'].fillna('Custodial')
+        merged_df_with_visits['to_type'] = merged_df_with_visits['to_type'].apply(
+            lambda x: 'Custodial' if str(x).strip() == '' else x
+        )
+        print(f"[OK] Filled blank to_type values with 'Custodial'")
+    
     print(f"[OK] Final merge result: {merged_df_with_visits.shape[0]} rows, {merged_df_with_visits.shape[1]} columns")
     print(f"[OK] Added 'Puzzle Patient' column: {merged_df_with_visits['Puzzle Patient'].sum()} patients with visits")
     
@@ -232,37 +374,78 @@ def export_summarized_data(df, output_path, facility_name):
             los_managed_avg = managed_care_data.mean() if len(managed_care_data) > 0 else 0
             los_medicare_avg = medicare_data.mean() if len(medicare_data) > 0 else 0
         
-        # Create discharge mapping
+        # Create discharge mapping (case-insensitive)
+        # Note: This mapping is used ONLY for counting/categorization purposes.
+        # The actual to_type values in the dataframe are NOT modified.
+        # "Unknown" values remain as "Unknown" in the data but are counted in OT.
         discharge_mapping = []
         if 'to_type' in df.columns:
-            for to_type in df['to_type'].fillna(''):
-                to_type_str = str(to_type).lower()
-                if 'hospital' in to_type_str:
+            for to_type in df['to_type'].fillna('Custodial'):
+                # Convert to string, strip whitespace, and make lowercase for case-insensitive matching
+                to_type_str = str(to_type).strip().lower()
+                
+                # Check for blank/empty values (should already be 'Custodial' but handle just in case)
+                if to_type_str == '':
+                    discharge_mapping.append('Custodial')
+                # Check for Custodial (case-insensitive)
+                elif 'custodial' in to_type_str:
+                    discharge_mapping.append('Custodial')
+                # Check for Hospital Transfer (case-insensitive)
+                elif 'hospital' in to_type_str:
                     discharge_mapping.append('Hospital Transfer')
+                # Check for Expired/Funeral (case-insensitive)
                 elif 'funeral' in to_type_str:
                     discharge_mapping.append('Expired')
+                # Check for Assisted Living (must check before Home Discharge to avoid double counting)
+                # Check for full phrase first, then individual components
+                elif ('board and care/assisted living/group home' in to_type_str or
+                      'board and care' in to_type_str or
+                      'assisted living' in to_type_str or
+                      ('assisted' in to_type_str and 'living' not in to_type_str) or  # "assisted" but not "assisted living"
+                      'group home' in to_type_str):
+                    discharge_mapping.append('Assisted Living')
+                # Check for Home Discharge with 'no' (HDN) - must check before regular Home Discharge
+                elif 'home' in to_type_str and 'no' in to_type_str and 'funeral' not in to_type_str:
+                    discharge_mapping.append('Home Discharge No')
+                # Check for Home Discharge (case-insensitive, but exclude funeral home and 'no')
                 elif 'home' in to_type_str and 'funeral' not in to_type_str:
                     discharge_mapping.append('Home Discharge')
-                elif 'other' in to_type_str:
+                # Check for Other or Unknown (case-insensitive)
+                # Note: "Unknown" values are counted as "Other" for OT calculations but remain unchanged in the data
+                elif 'other' in to_type_str or 'unknown' in to_type_str:
                     discharge_mapping.append('Other')
                 else:
                     discharge_mapping.append('Other')
         else:
-            discharge_mapping = ['Other'] * len(df)
+            discharge_mapping = ['Custodial'] * len(df)
         
         # Calculate discharge counts and ratios
         total_home_discharge = discharge_mapping.count('Home Discharge')
+        total_home_discharge_no = discharge_mapping.count('Home Discharge No')
         total_hospital_transfer = discharge_mapping.count('Hospital Transfer')
         total_expired = discharge_mapping.count('Expired')
+        total_custodial = discharge_mapping.count('Custodial')
+        total_assisted_living = discharge_mapping.count('Assisted Living')
+        total_other = discharge_mapping.count('Other')
         
         # Create ratio format KPIs (always show count:total_patients)
         hd_ratio = f"{total_home_discharge}:{patients_served}" if patients_served > 0 else "0:0"
+        hdn_ratio = f"{total_home_discharge_no}:{patients_served}" if patients_served > 0 else "0:0"
         ht_ratio = f"{total_hospital_transfer}:{patients_served}" if patients_served > 0 else "0:0"
         ex_ratio = f"{total_expired}:{patients_served}" if patients_served > 0 else "0:0"
+        cus_ratio = f"{total_custodial}:{patients_served}" if patients_served > 0 else "0:0"
+        al_ratio = f"{total_assisted_living}:{patients_served}" if patients_served > 0 else "0:0"
+        ot_ratio = f"{total_other}:{patients_served}" if patients_served > 0 else "0:0"
+        snf_ratio = "0:0"
         
         pct_home_discharge = (total_home_discharge / patients_served * 100) if patients_served > 0 else 0
+        pct_home_discharge_no = (total_home_discharge_no / patients_served * 100) if patients_served > 0 else 0
         pct_hospital_transfer = (total_hospital_transfer / patients_served * 100) if patients_served > 0 else 0
         pct_expired = (total_expired / patients_served * 100) if patients_served > 0 else 0
+        pct_custodial = (total_custodial / patients_served * 100) if patients_served > 0 else 0
+        pct_assisted_living = (total_assisted_living / patients_served * 100) if patients_served > 0 else 0
+        pct_other = (total_other / patients_served * 100) if patients_served > 0 else 0
+        pct_snf = 0
         
         # Create summarized data
         summarized_data = {
@@ -274,11 +457,21 @@ def export_summarized_data(df, output_path, facility_name):
             'LOS Man Avg': [round(los_managed_avg, 2)],
             'LOS Med Avg': [round(los_medicare_avg, 2)],
             'HD': [hd_ratio],
+            'HDN': [hdn_ratio],
             'HT': [ht_ratio],
             'Ex': [ex_ratio],
-            '%Home Discharge': [round(pct_home_discharge, 2)],
-            '%Hospital Transfer': [round(pct_hospital_transfer, 2)],
-            '%Expired': [round(pct_expired, 2)]
+            'Cus': [cus_ratio],
+            'AL': [al_ratio],
+            'OT': [ot_ratio],
+            'SNF': [snf_ratio],
+            '%HD': [round(pct_home_discharge, 2)],
+            '%HDN': [round(pct_home_discharge_no, 2)],
+            '%HT': [round(pct_hospital_transfer, 2)],
+            '%Ex': [round(pct_expired, 2)],
+            '%Cus': [round(pct_custodial, 2)],
+            '%AL': [round(pct_assisted_living, 2)],
+            '%OT': [round(pct_other, 2)],
+            '%SNF': [round(pct_snf, 2)]
         }
         
         summarized_df = pd.DataFrame(summarized_data)
@@ -296,11 +489,21 @@ def export_summarized_data(df, output_path, facility_name):
         print(f"    LOS Man Avg: {los_managed_avg:.2f}")
         print(f"    LOS Med Avg: {los_medicare_avg:.2f}")
         print(f"    HD: {hd_ratio}")
+        print(f"    HDN: {hdn_ratio}")
         print(f"    HT: {ht_ratio}")
         print(f"    Ex: {ex_ratio}")
-        print(f"    %Home Discharge: {pct_home_discharge:.2f}%")
-        print(f"    %Hospital Transfer: {pct_hospital_transfer:.2f}%")
-        print(f"    %Expired: {pct_expired:.2f}%")
+        print(f"    Cus: {cus_ratio}")
+        print(f"    AL: {al_ratio}")
+        print(f"    OT: {ot_ratio}")
+        print(f"    SNF: {snf_ratio}")
+        print(f"    %HD: {pct_home_discharge:.2f}%")
+        print(f"    %HDN: {pct_home_discharge_no:.2f}%")
+        print(f"    %HT: {pct_hospital_transfer:.2f}%")
+        print(f"    %Ex: {pct_expired:.2f}%")
+        print(f"    %Cus: {pct_custodial:.2f}%")
+        print(f"    %AL: {pct_assisted_living:.2f}%")
+        print(f"    %OT: {pct_other:.2f}%")
+        print(f"    %SNF: {pct_snf:.2f}%")
         
         return summarized_df
         
@@ -440,6 +643,17 @@ def extract_facility_name_from_filename(filename: str, file_type: str) -> str:
         if name.startswith('of '):
             name = name[3:]  # Remove "of "
     
+    # Remove common suffixes that might appear in filenames (q3, q2, q1, q4, snf, etc.)
+    # Remove quarter suffixes (q3, q2, q1, q4) - case insensitive, with optional spaces
+    name = re.sub(r'\s*(q[1-4]|quarter\s*[1-4])\s*$', '', name, flags=re.IGNORECASE)
+    
+    # Remove facility type suffixes (snf, ltc, etc.) - case insensitive
+    name = re.sub(r'\s*(snf|ltc|facility|center|home)\s*$', '', name, flags=re.IGNORECASE)
+    
+    # Normalize Mt. Pleasant variations (m. pleasant, mt. pleasant, mt pleasant -> mt pleasant)
+    name = re.sub(r'\bm\.?\s*pleasant\b', 'mt pleasant', name, flags=re.IGNORECASE)
+    name = re.sub(r'\bmt\.?\s*pleasant\b', 'mt pleasant', name, flags=re.IGNORECASE)
+    
     # Normalize common facility name variations for matching
     name = name.replace('at the', 'at_the')
     name = name.replace('of the', 'of_the') 
@@ -451,13 +665,17 @@ def extract_facility_name_from_filename(filename: str, file_type: str) -> str:
     if 'at_the shore' in name:
         name = name.replace('at_the shore', 'at_the_shore')
     
+    # Normalize multiple spaces to single space
+    name = re.sub(r'\s+', ' ', name)
+    
     # Final cleanup - remove any remaining spaces and normalize
     return name.strip()
 
 
 def normalize_facility_name_for_matching(facility_name: str) -> str:
     """
-    Normalize facility name for flexible matching (handles variations like 'of_farmington' vs 'farmington').
+    Normalize facility name for flexible matching (handles variations like 'of_farmington' vs 'farmington',
+    'grand rapids q3' vs 'grand rapids', 'ludington q3' vs 'ludington', etc.).
     
     Args:
         facility_name: The facility name to normalize
@@ -465,18 +683,26 @@ def normalize_facility_name_for_matching(facility_name: str) -> str:
     Returns:
         Normalized facility name for matching
     """
-    # Convert to lowercase and replace underscores with spaces
-    normalized = facility_name.lower().replace('_', ' ').strip()
+    # Convert to lowercase and replace underscores/dashes with spaces
+    normalized = facility_name.lower().replace('_', ' ').replace('-', ' ').strip()
     
     # Remove "of " prefix if present
     if normalized.startswith('of '):
         normalized = normalized[3:]
     
-    # Remove common suffixes that cause mismatches (quarters, periods, etc.)
-    # Remove Q1, Q2, Q3, Q4, Quarter 1, etc.
-    normalized = re.sub(r'\s+q[1-4]$', '', normalized)  # "holland q3" -> "holland"
-    normalized = re.sub(r'\s+quarter\s+[1-4]$', '', normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r'\s+[qQ][1-4]$', '', normalized)  # Handle "Q3" at end
+    # Remove common suffixes that might appear in filenames (q3, q2, q1, q4, snf, etc.)
+    # Remove quarter suffixes (q3, q2, q1, q4) - case insensitive, with optional spaces
+    normalized = re.sub(r'\s*(q[1-4]|quarter\s*[1-4])\s*$', '', normalized, flags=re.IGNORECASE)
+    
+    # Remove facility type suffixes (snf, ltc, etc.) - case insensitive
+    normalized = re.sub(r'\s*(snf|ltc|facility|center|home)\s*$', '', normalized, flags=re.IGNORECASE)
+    
+    # Normalize Mt. Pleasant variations (m. pleasant, mt. pleasant, mt pleasant -> mt pleasant)
+    normalized = re.sub(r'\bm\.?\s*pleasant\b', 'mt pleasant', normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r'\bmt\.?\s*pleasant\b', 'mt pleasant', normalized, flags=re.IGNORECASE)
+    
+    # Normalize multiple spaces to single space
+    normalized = re.sub(r'\s+', ' ', normalized)
     
     # Remove leading/trailing whitespace
     normalized = normalized.strip()
@@ -540,15 +766,15 @@ def format_facility_name_for_display(facility_name: str) -> str:
 
 def find_matching_files(adt_folder: str, patient_folder: str, visit_folder: str) -> List[Tuple[str, str, str]]:
     """
-    Find matching ADT and patient files based on facility names, plus visit files.
+    Find matching ADT and patient files based on facility names, plus visit folder.
     
     Args:
         adt_folder: Folder containing ADT cycle CSV files
         patient_folder: Folder containing patient data CSV files
-        visit_folder: Folder containing visit data CSV files
+        visit_folder: Folder containing visit data CSV files (or single file path)
     
     Returns:
-        List of tuples (adt_file, patient_file, visit_file) for matching files
+        List of tuples (adt_file, patient_file, visit_folder) for matching files
     """
     print("Searching for matching files...")
     
@@ -560,13 +786,15 @@ def find_matching_files(adt_folder: str, patient_folder: str, visit_folder: str)
     patient_files = find_csv_files_in_folder(patient_folder, ['patient', 'medilodge'])
     all_patient_files = sorted(list(set(patient_files.get('patient', []) + patient_files.get('medilodge', []))))
     
-    # Find visit files (should be the same for all) (deduplicate in case files match multiple patterns)
-    visit_files = find_csv_files_in_folder(visit_folder, ['visit', 'change', 'capture'])
-    all_visit_files = sorted(list(set(visit_files.get('visit', []) + visit_files.get('change', []) + visit_files.get('capture', []))))
+    # Visit folder can contain multiple files - we'll pass the folder path directly
+    # Check if visit_folder exists (can be a file or folder)
+    visit_path = Path(visit_folder)
+    if not visit_path.exists():
+        raise FileNotFoundError(f"Visit folder/file not found: {visit_folder}")
     
     print(f"Found {len(all_adt_files)} ADT files")
     print(f"Found {len(all_patient_files)} patient files")
-    print(f"Found {len(all_visit_files)} visit files")
+    print(f"Visit data: {visit_folder} ({'folder' if visit_path.is_dir() else 'file'})")
     
     # Create facility name mappings
     adt_facilities = {}
@@ -603,16 +831,12 @@ def find_matching_files(adt_folder: str, patient_folder: str, visit_folder: str)
     for normalized_name, (adt_facility_name, adt_file) in normalized_adt_map.items():
         if normalized_name in normalized_patient_map:
             patient_facility_name, patient_file = normalized_patient_map[normalized_name]
-            # Use the first visit file for all matches (assuming it's the same Change Capture file)
-            if all_visit_files:
-                visit_file = all_visit_files[0]  # Use the first (and likely only) visit file
-                matches.append((adt_file, patient_file, visit_file))
-                print(f"[OK] Match found: '{adt_facility_name}' <-> '{patient_facility_name}' (normalized: '{normalized_name}')")
-                print(f"  ADT: {Path(adt_file).name}")
-                print(f"  Patient: {Path(patient_file).name}")
-                print(f"  Visit: {Path(visit_file).name}")
-            else:
-                print(f"[FAILED] No visit files found for match: '{adt_facility_name}'")
+            # Use the visit folder path for all matches (will combine all files in folder)
+            matches.append((adt_file, patient_file, visit_folder))
+            print(f"[OK] Match found: '{adt_facility_name}' <-> '{patient_facility_name}' (normalized: '{normalized_name}')")
+            print(f"  ADT: {Path(adt_file).name}")
+            print(f"  Patient: {Path(patient_file).name}")
+            print(f"  Visit: {visit_folder}")
         else:
             print(f"[FAILED] No matching patient file for ADT: '{adt_facility_name}' (normalized: '{normalized_name}')")
             print(f"  Available patient facilities (normalized): {list(normalized_patient_map.keys())}")
@@ -629,7 +853,8 @@ def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str
     Args:
         adt_folder: Folder containing ADT cycle CSV files
         patient_folder: Folder containing patient data CSV files  
-        visit_folder: Folder containing visit data CSV files (Change Capture file)
+        visit_folder: Folder containing visit data CSV/Excel files (or path to single file).
+                      If folder contains multiple files, they will be combined into one.
         output_folder: Folder to save combined output files
         facility_name: Optional facility name for summary data
     """
@@ -651,13 +876,15 @@ def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str
     # Process each matching combination
     processed_count = 0
     
-    for adt_file, patient_file, visit_file in matches:
+    for adt_file, patient_file, visit_file_or_folder in matches:
         try:
             print(f"\n{'='*60}")
             print(f"Processing match {processed_count + 1}:")
             print(f"ADT: {Path(adt_file).name}")
             print(f"Patient: {Path(patient_file).name}")
-            print(f"Visit: {Path(visit_file).name}")
+            visit_path = Path(visit_file_or_folder)
+            visit_display = visit_path.name if visit_path.is_file() else f"{visit_file_or_folder} (folder)"
+            print(f"Visit: {visit_display}")
             print(f"{'='*60}")
             
             # Generate output filename based on facility name
@@ -671,7 +898,7 @@ def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str
             current_facility_name = facility_name or facility_name_clean
             
             # Process this combination
-            process_file_combination(adt_file, patient_file, visit_file, str(output_path), current_facility_name)
+            process_file_combination(adt_file, patient_file, visit_file_or_folder, str(output_path), current_facility_name)
             
             processed_count += 1
             
@@ -686,7 +913,7 @@ def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str
     print(f"{'='*80}")
 
 
-def process_file_combination(adt_file: str, patient_file: str, visit_file: str, 
+def process_file_combination(adt_file: str, patient_file: str, visit_file_or_folder: str, 
                            output_file: str, facility_name: str = None) -> None:
     """
     Process a single combination of ADT, patient, and visit files.
@@ -694,14 +921,14 @@ def process_file_combination(adt_file: str, patient_file: str, visit_file: str,
     Args:
         adt_file: Path to ADT cycles CSV file
         patient_file: Path to patient data CSV file
-        visit_file: Path to visit data CSV file
+        visit_file_or_folder: Path to visit data CSV file or folder containing multiple visit files
         output_file: Path for the output CSV file
         facility_name: Optional facility name for summary data
     """
     # Load all input files
     adt_df = load_csv_file(adt_file, "ADT cycles")
     patient_df = load_csv_file(patient_file, "Patient data")
-    visit_df = load_csv_file(visit_file, "Visit data")
+    visit_df = load_visit_files_from_folder(visit_file_or_folder, "Visit data")
     
     # Process each dataset
     adt_df = process_adt_data(adt_df)
@@ -710,6 +937,18 @@ def process_file_combination(adt_file: str, patient_file: str, visit_file: str,
     
     # Merge all data
     final_df = merge_dataframes(adt_df, patient_df, visit_counts)
+    
+    # Filter to only include Puzzle Patients (Puzzle Patient = True)
+    print("\n--- Filtering Puzzle Patients ---")
+    initial_count = len(final_df)
+    final_df = final_df[final_df['Puzzle Patient'] == True].copy()
+    filtered_count = len(final_df)
+    excluded_count = initial_count - filtered_count
+    
+    print(f"[OK] Filtered data: {filtered_count} Puzzle Patients (excluded {excluded_count} non-Puzzle Patients)")
+    
+    if filtered_count == 0:
+        print("⚠ Warning: No Puzzle Patients found after filtering. Output files will be empty.")
     
     # Save output
     save_output(final_df, output_file)
@@ -735,11 +974,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process individual files:
+  # Process individual files (visit can be a file or folder):
   python csv_combiner.py adt_data.csv patient_data.csv visit_data.csv output.csv
   python csv_combiner.py ADT-Example_cycles.csv Medilodge_of_Farmington.csv Change_Capture.xlsx combined_output.csv
+  python csv_combiner.py ADT-Example_cycles.csv Medilodge_of_Farmington.csv change-capture/ combined_output.csv
   
-  # Process folders with name matching:
+  # Process folders with name matching (visit folder can contain multiple files):
   python csv_combiner.py --folders adt_folder/ patient_folder/ visit_folder/ output_folder/
   python csv_combiner.py --folders adt_folder/ patient_folder/ visit_folder/ output_folder/ --facility-name "Medilodge Facility"
         """
@@ -751,12 +991,12 @@ Examples:
     # Individual file processing
     group.add_argument('adt_file', nargs='?', help='Path to ADT cycles CSV file (for individual file processing)')
     group.add_argument('patient_file', nargs='?', help='Path to patient data CSV file (for individual file processing)')
-    group.add_argument('visit_file', nargs='?', help='Path to visit data CSV/Excel file (for individual file processing)')
+    group.add_argument('visit_file', nargs='?', help='Path to visit data CSV/Excel file or folder (for individual file processing). If folder, all files will be combined.')
     group.add_argument('output_file', nargs='?', help='Path for the output CSV file (for individual file processing)')
     
     # Folder processing
     group.add_argument('--folders', nargs=4, metavar=('ADT_FOLDER', 'PATIENT_FOLDER', 'VISIT_FOLDER', 'OUTPUT_FOLDER'),
-                      help='Process folders of CSV files: ADT_FOLDER PATIENT_FOLDER VISIT_FOLDER OUTPUT_FOLDER')
+                      help='Process folders of CSV files: ADT_FOLDER PATIENT_FOLDER VISIT_FOLDER OUTPUT_FOLDER. VISIT_FOLDER can contain multiple files that will be combined.')
     
     parser.add_argument('--facility-name', help='Name of the facility for summarized data (default: extracted from patient file name)')
     
@@ -789,7 +1029,9 @@ Examples:
         print("=" * 60)
         print(f"ADT file: {args.adt_file}")
         print(f"Patient file: {args.patient_file}")
-        print(f"Visit file: {args.visit_file}")
+        visit_path = Path(args.visit_file)
+        visit_display = f"{args.visit_file} ({'folder' if visit_path.is_dir() else 'file'})"
+        print(f"Visit data: {visit_display}")
         print(f"Output file: {args.output_file}")
         print("=" * 60)
         
