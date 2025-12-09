@@ -84,4 +84,3 @@ async def get_job_logs_tail(job_id: str, lines: int = 100):
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading logs: {str(e)}")
-
