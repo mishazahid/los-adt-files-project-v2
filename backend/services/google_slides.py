@@ -249,4 +249,3 @@ class GoogleSlidesService:
         except Exception as e:
             logger.error(f"Error updating slide content: {e}")
             return False
-
