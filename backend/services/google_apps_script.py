@@ -17,6 +17,7 @@ class GoogleAppsScriptService:
         self.service = None
         self.script_id = os.getenv("GOOGLE_APPS_SCRIPT_ID", "")
         self.web_app_url = os.getenv("GOOGLE_APPS_SCRIPT_WEB_APP_URL", "")
+        self.test_fac_web_app_url = os.getenv("GOOGLE_APPS_SCRIPT_TEST_FAC_WEB_APP_URL", "")
         self._initialize_service()
     
     def _initialize_service(self):
@@ -168,29 +169,79 @@ class GoogleAppsScriptService:
     async def _execute_via_web_app(self, function_name: str) -> dict:
         """
         Execute Apps Script function via Web App deployment (HTTP POST)
-        This method doesn't require special service account permissions
+        Uses the default web_app_url
+        """
+        if not self.web_app_url:
+            logger.warning("Web App URL not set")
+            return {"success": False, "error": "Web App URL not configured"}
+        
+        return await self._execute_via_web_app_url(function_name, self.web_app_url)
+    
+    async def generate_facility_slides(self) -> dict:
+        """
+        Execute the generateFacilitySlides() function in Apps Script
+        
+        Returns:
+            Dictionary with success status
+        """
+        return await self.execute_function('generateFacilitySlides')
+    
+    async def generate_executive_summary(self) -> dict:
+        """
+        Execute the generateExecutiveSummarySlide() function in Apps Script
+        
+        Returns:
+            Dictionary with success status
+        """
+        return await self.execute_function('generateExecutiveSummarySlide')
+    
+    async def generate_test_fac_pdf(self) -> dict:
+        """
+        Execute the createFacilityReport() function in Test Fac Apps Script
+        Uses the Test Fac Web App URL
+        
+        Returns:
+            Dictionary with success status and PDF link if available
+        """
+        if not self.test_fac_web_app_url:
+            logger.warning("Test Fac Web App URL not set")
+            return {"success": False, "error": "Test Fac Web App URL not configured"}
+        
+        logger.info(f"Using Test Fac Web App URL: {self.test_fac_web_app_url[:50]}...")
+        return await self._execute_via_web_app_url('createFacilityReport', self.test_fac_web_app_url)
+    
+    async def _execute_via_web_app_url(self, function_name: str, web_app_url: str) -> dict:
+        """
+        Execute Apps Script function via Web App deployment (HTTP POST)
+        Generic version that accepts any Web App URL
+        
+        Args:
+            function_name: Name of the function to execute
+            web_app_url: The Web App URL to call
+        
+        Returns:
+            Dictionary with success status and result
         """
         try:
             # Ensure URL ends with /exec (not /dev)
-            web_app_url = self.web_app_url.rstrip('/')
-            if not web_app_url.endswith('/exec'):
-                if web_app_url.endswith('/dev'):
-                    web_app_url = web_app_url.replace('/dev', '/exec')
+            url = web_app_url.rstrip('/')
+            if not url.endswith('/exec'):
+                if url.endswith('/dev'):
+                    url = url.replace('/dev', '/exec')
                 else:
-                    web_app_url = web_app_url + '/exec'
+                    url = url + '/exec'
             
-            logger.info(f"Calling Web App URL: {web_app_url[:80]}...")
+            logger.info(f"Calling Web App URL: {url[:80]}...")
             
             # Call the web app URL with the function name as a parameter
             async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
                 response = await client.post(
-                    web_app_url,
+                    url,
                     json={"function": function_name},
                     headers={"Content-Type": "application/json"}
                 )
                 
                 logger.info(f"Web App response status: {response.status_code}")
-                logger.info(f"Web App response headers: {dict(response.headers)}")
                 
                 if response.status_code == 200:
                     try:
@@ -219,21 +270,3 @@ class GoogleAppsScriptService:
             error_msg = f"Error calling Web App: {e}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
-    
-    async def generate_facility_slides(self) -> dict:
-        """
-        Execute the generateFacilitySlides() function in Apps Script
-        
-        Returns:
-            Dictionary with success status
-        """
-        return await self.execute_function('generateFacilitySlides')
-    
-    async def generate_executive_summary(self) -> dict:
-        """
-        Execute the generateExecutiveSummarySlide() function in Apps Script
-        
-        Returns:
-            Dictionary with success status
-        """
-        return await self.execute_function('generateExecutiveSummarySlide')
