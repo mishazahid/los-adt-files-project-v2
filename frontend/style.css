@@ -618,6 +618,7 @@ header h1 {
     .upload-box {
         grid-template-columns: 1fr;
     }
+    
 
     .container {
         padding: 10px;
