@@ -184,8 +184,14 @@ class GoogleSheetsService:
             if quarter_value:
                 await self.update_executive_sheet_quarter(quarter_value)
             
-            # Return the sheet URL
-            return f"https://docs.google.com/spreadsheets/d/{self.sheet_id}"
+            # Copy data to Test sheet (Raw_Data tab)
+            test_sheet_link = await self.copy_to_test_sheet(quarter_value)
+            
+            # Return both sheet URLs as a dict
+            return {
+                "facility_summary": f"https://docs.google.com/spreadsheets/d/{self.sheet_id}",
+                "test_fac": test_sheet_link
+            }
         
         except HttpError as e:
             logger.error(f"Error updating Google Sheets: {e}")
@@ -301,6 +307,87 @@ class GoogleSheetsService:
             return False
         except Exception as e:
             logger.error(f"Error updating Executive sheet Quarter: {e}")
+            return False
+    
+    async def copy_to_test_sheet(self, quarter_value: Optional[str] = None) -> str:
+        """
+        Copy data from Summary sheet to Test sheet's Raw_Data tab
+        Clears existing data in Raw_Data tab and pastes Summary data starting at A1
+        Also updates Summary tab B2 with quarter value if provided
+        
+        Args:
+            quarter_value: Optional quarter value to write to Summary tab B2
+        
+        Returns:
+            str: Test sheet URL
+        """
+        if not self.sheets_service:
+            logger.warning("Google Sheets service not available")
+            return False
+        
+        try:
+            # Test sheet configuration
+            test_sheet_id = "1FvZLxUS36JON-O8yY6zvrxxYyfOMHtHzmKAWUd5ytZk"
+            test_sheet_tab = "Raw_Data"
+            
+            # Read data from Summary tab of current sheet
+            # Use wider range to include GS, PPS, INC columns (AA, AB, AC)
+            logger.info(f"Reading data from Summary tab of sheet {self.sheet_id}")
+            source_data = self.sheets_service.values().get(
+                spreadsheetId=self.sheet_id,
+                range=f"{self.sheet_tab}!A:AC"
+            ).execute()
+            
+            source_values = source_data.get('values', [])
+            if not source_values:
+                logger.warning("No data found in Summary sheet to copy")
+                return False
+            
+            logger.info(f"Found {len(source_values)} rows to copy to Test sheet")
+            
+            # Clear existing data in Raw_Data tab of Test sheet
+            # Clear wider range to include GS, PPS, INC columns
+            logger.info(f"Clearing existing data in {test_sheet_tab} tab of Test sheet")
+            self.sheets_service.values().clear(
+                spreadsheetId=test_sheet_id,
+                range=f"{test_sheet_tab}!A1:AC10000"
+            ).execute()
+            
+            # Paste data starting at A1
+            body = {
+                'values': source_values
+            }
+            
+            result = self.sheets_service.values().update(
+                spreadsheetId=test_sheet_id,
+                range=f"{test_sheet_tab}!A1",
+                valueInputOption='RAW',
+                body=body
+            ).execute()
+            
+            logger.info(f"Copied {result.get('updatedCells', 0)} cells to Test sheet Raw_Data tab")
+            
+            # Update Summary tab B2 with quarter value if provided
+            if quarter_value:
+                try:
+                    self.sheets_service.values().update(
+                        spreadsheetId=test_sheet_id,
+                        range="Summary!B2",
+                        valueInputOption='RAW',
+                        body={'values': [[quarter_value]]}
+                    ).execute()
+                    logger.info(f"Updated Test sheet Summary tab B2 with quarter value: {quarter_value}")
+                except Exception as e:
+                    logger.warning(f"Could not update quarter value in Test sheet Summary tab: {e}")
+            
+            # Return the Test sheet URL
+            return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
+            
+        except HttpError as e:
+            logger.error(f"HTTP error copying to Test sheet: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error copying to Test sheet: {e}")
             return False
     
     async def append_data(self, data: list, sheet_name: Optional[str] = None) -> bool:
