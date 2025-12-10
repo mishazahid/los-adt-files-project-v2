@@ -16,6 +16,7 @@ import concurrent.futures
 from backend.services.google_sheets import GoogleSheetsService
 from backend.services.google_slides import GoogleSlidesService
 from backend.services.google_apps_script import GoogleAppsScriptService
+from backend.config import job_status
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -39,9 +40,22 @@ class PipelineService:
         self.los_script = self.project_root / "los-generate.py"
         self.combiner_script = self.project_root / "csv_combiner-test.py"
         self.summary_script = self.project_root / "summary_combiner.py"
-        
+
         # Thread pool executor for running scripts (Windows compatible)
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+
+    def _set_progress(self, job_id: str, progress: int, message: str = None):
+        """
+        Safely update job progress and optional message.
+        """
+        try:
+            if job_id in job_status:
+                job_status[job_id]["progress"] = progress
+                if message:
+                    job_status[job_id]["message"] = message
+        except Exception:
+            # Avoid breaking pipeline on progress update issues
+            pass
     
     async def run_pipeline(self, job_id: str, job_dir: str) -> Dict[str, Any]:
         """
@@ -140,6 +154,7 @@ class PipelineService:
             results["outputs"]["combined"] = str(combined_dir)
             results["steps_completed"].append("combining")
             await self._log(log_file, f"[{datetime.now()}] [OK] Data combination complete")
+            self._set_progress(job_id, 40, "Data combined")
             
             # Normalize combined files
             await self._normalize_filenames(combined_dir, log_file)
@@ -175,6 +190,7 @@ class PipelineService:
             results["outputs"]["summary"] = str(summary_dir)
             results["steps_completed"].append("summary")
             await self._log(log_file, f"[{datetime.now()}] [OK] Summary generation complete")
+            self._set_progress(job_id, 60, "Summary generated")
             
             # Step 5: Update Google Sheets
             await self._log(log_file, f"[{datetime.now()}] Step 5: Updating Google Sheets...")
@@ -183,13 +199,57 @@ class PipelineService:
                 # Get facility values from job status if available
                 from backend.config import job_status
                 facility_values = job_status.get(job_id, {}).get("facility_values", {})
-                sheets_link = await self.sheets_service.update_sheets(master_summary_path, facility_values)
-                results["links"]["google_sheets"] = sheets_link
+                sheets_links = await self.sheets_service.update_sheets(master_summary_path, facility_values)
+                # Handle both old format (string) and new format (dict)
+                if isinstance(sheets_links, dict):
+                    results["links"]["google_sheets"] = sheets_links.get("facility_summary", "")
+                    results["links"]["test_fac_sheets"] = sheets_links.get("test_fac", "")
+                else:
+                    # Backward compatibility
+                    results["links"]["google_sheets"] = sheets_links
+                    results["links"]["test_fac_sheets"] = ""
                 results["steps_completed"].append("sheets_update")
                 await self._log(log_file, f"[{datetime.now()}] [OK] Google Sheets updated")
+                self._set_progress(job_id, 75, "Sheets updated")
+                
+                # Wait a few seconds for Test sheet formulas to calculate
+                await self._log(log_file, f"[{datetime.now()}] Waiting for Test sheet formulas to calculate...")
+                await asyncio.sleep(5)  # Wait 5 seconds for formulas
+                
+                # Step 5.5: Generate Test Fac PDF using Apps Script
+                await self._log(log_file, f"[{datetime.now()}] Step 5.5: Generating Test Fac PDF via Apps Script...")
+                test_fac_pdf_result = await self.apps_script_service.generate_test_fac_pdf()
+                if test_fac_pdf_result.get("success"):
+                    results["steps_completed"].append("test_fac_pdf_generation")
+                    result_data = test_fac_pdf_result.get("result", {})
+                    test_fac_pdf_link = None
+                    
+                    await self._log(log_file, f"[{datetime.now()}] Test Fac Apps Script response: {json.dumps(result_data, indent=2)}")
+                    
+                    if isinstance(result_data, dict):
+                        test_fac_pdf_link = (
+                            result_data.get("pdf_link") or 
+                            result_data.get("pdfLink") or 
+                            result_data.get("url") or
+                            result_data.get("fileUrl") or
+                            result_data.get("pdf_url") or
+                            result_data.get("pdfUrl")
+                        )
+                    
+                    if test_fac_pdf_link:
+                        results["links"]["test_fac_pdf"] = test_fac_pdf_link
+                        await self._log(log_file, f"[{datetime.now()}] [OK] Test Fac PDF generated: {test_fac_pdf_link}")
+                        self._set_progress(job_id, 85, "Test Fac PDF generated")
+                    else:
+                        # Fallback to Drive folder link
+                        results["links"]["test_fac_pdf"] = "https://drive.google.com/drive/folders/1DOThKA_GrOHzDZomzjOxnYfzCjVNWCql"
+                        await self._log(log_file, f"[{datetime.now()}] [OK] Test Fac PDF generated via Apps Script (using default Drive folder link)")
+                        self._set_progress(job_id, 85, "Test Fac PDF generated")
+                else:
+                    await self._log(log_file, f"[{datetime.now()}] [WARNING] Test Fac PDF generation failed: {test_fac_pdf_result.get('error', 'Unknown error')}")
             
-            # Step 6: Generate PDF using Apps Script
-            await self._log(log_file, f"[{datetime.now()}] Step 6: Generating PDF via Apps Script...")
+            # Step 6: Generate Facility Summary PDF using Apps Script
+            await self._log(log_file, f"[{datetime.now()}] Step 6: Generating Facility Summary PDF via Apps Script...")
             pdf_result = await self.apps_script_service.generate_pdf()
             if pdf_result.get("success"):
                 results["steps_completed"].append("pdf_generation")
@@ -225,6 +285,7 @@ class PipelineService:
                 if pdf_link:
                     results["links"]["generated_pdf"] = pdf_link
                     await self._log(log_file, f"[{datetime.now()}] [OK] PDF generated via Apps Script: {pdf_link}")
+                    self._set_progress(job_id, 95, "Facility Summary PDF generated")
                 else:
                     # Use the default Google Drive folder link as fallback
                     default_drive_folder = "https://drive.google.com/drive/folders/1DOThKA_GrOHzDZomzjOxnYfzCjVNWCql?usp=drive_link"
