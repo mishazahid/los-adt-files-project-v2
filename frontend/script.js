@@ -330,8 +330,9 @@ async function checkJobStatus(jobId) {
 
         // Update status display
         jobStatusEl.textContent = status.status || 'Unknown';
-        progressBar.style.width = `${status.progress || 0}%`;
-        progressText.textContent = `${status.progress || 0}%`;
+        const pct = status.progress || 0;
+        progressBar.style.width = `${pct}%`;
+        progressText.textContent = `${pct}%`;
 
         // Check if job is complete
         if (status.status === 'completed') {
@@ -423,50 +424,80 @@ async function showResults(jobId, status) {
             driveLinks.innerHTML = '';
             const linksData = status.outputs.links;
             
+            // Create a container for Google Sheets links to display side by side
+            const sheetsContainer = document.createElement('div');
+            sheetsContainer.style.display = 'flex';
+            sheetsContainer.style.gap = '15px';
+            sheetsContainer.style.flexWrap = 'wrap';
+            sheetsContainer.style.marginBottom = '15px';
+            
             if (linksData.google_sheets) {
                 const link = document.createElement('a');
                 link.href = linksData.google_sheets;
                 link.target = '_blank';
                 link.className = 'drive-link';
-                link.textContent = '📊 Google Sheets';
-                driveLinks.appendChild(link);
+                link.textContent = '📊 Facility Summary';
+                sheetsContainer.appendChild(link);
             }
+            
+            if (linksData.test_fac_sheets) {
+                const link = document.createElement('a');
+                link.href = linksData.test_fac_sheets;
+                link.target = '_blank';
+                link.className = 'drive-link';
+                link.textContent = '📊 Test Fac';
+                sheetsContainer.appendChild(link);
+            }
+            
+            if (sheetsContainer.children.length > 0) {
+                driveLinks.appendChild(sheetsContainer);
+            }
+            
+            // Create a container for PDF links to display side by side
+            const pdfContainer = document.createElement('div');
+            pdfContainer.style.display = 'flex';
+            pdfContainer.style.gap = '15px';
+            pdfContainer.style.flexWrap = 'wrap';
+            pdfContainer.style.marginBottom = '15px';
             
             if (linksData.generated_pdf) {
                 // Check if it's a URL or just a message
                 if (linksData.generated_pdf.startsWith('http')) {
-                    const linkContainer = document.createElement('div');
-                    linkContainer.className = 'drive-link-container';
-                    linkContainer.style.marginBottom = '10px';
-                    
                     const link = document.createElement('a');
                     link.href = linksData.generated_pdf;
                     link.target = '_blank';
                     link.className = 'drive-link';
-                    link.textContent = '📄 View PDF on Google Drive';
-                    link.style.display = 'block';
-                    link.style.marginBottom = '5px';
-                    
-                    // Add the actual URL as a smaller text below
-                    const urlText = document.createElement('span');
-                    urlText.className = 'drive-url';
-                    urlText.style.fontSize = '0.85em';
-                    urlText.style.color = '#666';
-                    urlText.style.wordBreak = 'break-all';
-                    urlText.textContent = linksData.generated_pdf;
-                    
-                    linkContainer.appendChild(link);
-                    linkContainer.appendChild(urlText);
-                    driveLinks.appendChild(linkContainer);
+                    link.textContent = '📄 Facility Summary PDF';
+                    pdfContainer.appendChild(link);
                 } else {
                     // If it's just a message, show it as text with a note
                     const text = document.createElement('span');
                     text.className = 'drive-link';
-                    text.style.display = 'block';
-                    text.style.marginTop = '10px';
-                    text.textContent = `📄 ${linksData.generated_pdf}`;
-                    driveLinks.appendChild(text);
+                    text.textContent = `📄 Facility Summary PDF: ${linksData.generated_pdf}`;
+                    pdfContainer.appendChild(text);
                 }
+            }
+            
+            if (linksData.test_fac_pdf) {
+                // Check if it's a URL or just a message
+                if (linksData.test_fac_pdf.startsWith('http')) {
+                    const link = document.createElement('a');
+                    link.href = linksData.test_fac_pdf;
+                    link.target = '_blank';
+                    link.className = 'drive-link';
+                    link.textContent = '📄 Test Fac PDF';
+                    pdfContainer.appendChild(link);
+                } else {
+                    // If it's just a message, show it as text with a note
+                    const text = document.createElement('span');
+                    text.className = 'drive-link';
+                    text.textContent = `📄 Test Fac PDF: ${linksData.test_fac_pdf}`;
+                    pdfContainer.appendChild(text);
+                }
+            }
+            
+            if (pdfContainer.children.length > 0) {
+                driveLinks.appendChild(pdfContainer);
             }
             
             if (linksData.google_slides) {
