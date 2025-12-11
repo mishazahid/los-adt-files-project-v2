@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional
 import os
 import logging
+import datetime
+import numpy as np
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -23,6 +25,116 @@ class GoogleSheetsService:
         self._initialize_service()
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID", "1CWV6su2PZUrP372Vd19N6sZzXcEFxZb_NNZwT0af0Wo")
         self.sheet_tab = os.getenv("GOOGLE_SHEET_TAB", "Summary")
+
+    @staticmethod
+    def _to_number(value):
+        """
+        Convert common string representations to numeric values so Sheets
+        stores numbers instead of text or time formats.
+        - "h:mm:ss", "m:ss" or "mm:ss" -> minutes as decimal (e.g., 2:13 -> 2.2167)
+        - plain numeric strings -> float
+        - pandas/NumPy timedeltas or datetime/time -> minutes as decimal
+        Otherwise returns the original value.
+        """
+        try:
+            # Keep blanks as-is
+            if value is None or value == "":
+                return value
+
+            # Timedelta handling
+            if isinstance(value, pd.Timedelta):
+                return value.total_seconds() / 60.0
+            if isinstance(value, datetime.timedelta):
+                return value.total_seconds() / 60.0
+            if isinstance(value, np.timedelta64):
+                return value.astype('timedelta64[s]').astype(float) / 60.0
+
+            # datetime/time -> minutes
+            if isinstance(value, datetime.datetime):
+                return value.hour * 60 + value.minute + value.second / 60.0
+            if isinstance(value, datetime.time):
+                return value.hour * 60 + value.minute + value.second / 60.0
+
+            if isinstance(value, str):
+                parts = value.split(":")
+                if len(parts) == 3 and all(p.strip().isdigit() for p in parts):
+                    hours = int(parts[0].strip())
+                    minutes = int(parts[1].strip())
+                    seconds = int(parts[2].strip())
+                    return hours * 60 + minutes + seconds / 60.0
+                if len(parts) == 2 and all(p.strip().isdigit() for p in parts):
+                    minutes = int(parts[0].strip())
+                    seconds = int(parts[1].strip())
+                    return minutes + seconds / 60.0
+                # plain numeric string
+                return float(value)
+
+            # Already numeric
+            return float(value)
+        except Exception:
+            return value
+
+    @staticmethod
+    def _normalize_numeric_columns(values, start_col: int = 1, end_col: int = 28):
+        """
+        Convert columns (1-indexed in Sheets terms; 0-indexed in Python lists)
+        within the provided range to numeric using _to_number, skipping the header row.
+        Default range: columns B (index 1) through AC (index 28).
+        """
+        for r_idx, row in enumerate(values):
+            if r_idx == 0:
+                continue  # header
+            for c_idx in range(start_col, min(len(row), end_col + 1)):
+                row[c_idx] = GoogleSheetsService._to_number(row[c_idx])
+        return values
+
+    def _get_sheet_id(self, spreadsheet_id: str, tab_title: str) -> Optional[int]:
+        """Fetch sheetId for a given tab title."""
+        try:
+            meta = self.sheets_service.get(spreadsheetId=spreadsheet_id).execute()
+            for sheet in meta.get("sheets", []):
+                props = sheet.get("properties", {})
+                if props.get("title") == tab_title:
+                    return props.get("sheetId")
+        except Exception as e:
+            logger.warning(f"Could not get sheetId for {tab_title}: {e}")
+        return None
+
+    def _set_number_format(self, spreadsheet_id: str, tab_title: str, start_row: int = 2):
+        """
+        Force columns B:AC to plain number format to avoid time/date display.
+        Applies from start_row to end of sheet.
+        """
+        sheet_id = self._get_sheet_id(spreadsheet_id, tab_title)
+        if sheet_id is None:
+            return
+        try:
+            requests = [{
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": start_row - 1,  # zero-based
+                        "startColumnIndex": 1,  # column B
+                        "endColumnIndex": 29    # column AC (exclusive)
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "numberFormat": {
+                                "type": "NUMBER",
+                                "pattern": "0.00"
+                            }
+                        }
+                    },
+                    "fields": "userEnteredFormat.numberFormat"
+                }
+            }]
+            self.sheets_service.batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": requests}
+            ).execute()
+            logger.info(f"Applied numeric format to {tab_title}!B:AC")
+        except Exception as e:
+            logger.warning(f"Failed to apply numeric format to {tab_title}: {e}")
     
     def _initialize_service(self):
         """Initialize Google Sheets API service"""
@@ -108,6 +220,9 @@ class GoogleSheetsService:
             
             # Read CSV file
             df = pd.read_csv(csv_file)
+
+            # Normalize values to numeric where possible to avoid time/text formatting
+            df = df.applymap(self._to_number)
             
             # Extract quarter value (for Executive sheet only, not Summary sheet)
             quarter_value = None
@@ -152,6 +267,9 @@ class GoogleSheetsService:
             # Convert DataFrame to list of lists (values)
             values = [df.columns.tolist()]  # Header row
             values.extend(df.values.tolist())
+
+            # Normalize numeric columns B:AC to ensure numbers, not strings/times
+            values = self._normalize_numeric_columns(values, start_col=1, end_col=28)
             
             # Clear existing data
             # 1) Hard-clear GS/PPS/INC columns to avoid stale data even if new payload is smaller
@@ -174,11 +292,14 @@ class GoogleSheetsService:
             result = self.sheets_service.values().update(
                 spreadsheetId=self.sheet_id,
                 range=f"{self.sheet_tab}!A1",
-                valueInputOption='RAW',
+                valueInputOption='USER_ENTERED',
                 body=body
             ).execute()
             
             logger.info(f"Updated {self.sheet_tab} sheet: {result.get('updatedCells')} cells updated")
+
+            # Force numeric format on Summary sheet columns B:AC
+            self._set_number_format(self.sheet_id, self.sheet_tab, start_row=2)
             
             # Update Executive sheet with Quarter value if provided
             if quarter_value:
@@ -295,7 +416,7 @@ class GoogleSheetsService:
             result = self.sheets_service.values().update(
                 spreadsheetId=self.sheet_id,
                 range=f"{executive_tab}!A1",
-                valueInputOption='RAW',
+                valueInputOption='USER_ENTERED',
                 body=body
             ).execute()
             
@@ -343,6 +464,9 @@ class GoogleSheetsService:
                 logger.warning("No data found in Summary sheet to copy")
                 return False
             
+            # Normalize numeric columns B:AC before writing to Test sheet
+            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=28)
+            
             logger.info(f"Found {len(source_values)} rows to copy to Test sheet")
             
             # Clear existing data in Raw_Data tab of Test sheet
@@ -361,11 +485,14 @@ class GoogleSheetsService:
             result = self.sheets_service.values().update(
                 spreadsheetId=test_sheet_id,
                 range=f"{test_sheet_tab}!A1",
-                valueInputOption='RAW',
+                valueInputOption='USER_ENTERED',
                 body=body
             ).execute()
             
             logger.info(f"Copied {result.get('updatedCells', 0)} cells to Test sheet Raw_Data tab")
+
+            # Force numeric format on Test sheet Raw_Data columns B:AC
+            self._set_number_format(test_sheet_id, test_sheet_tab, start_row=2)
             
             # Update Summary tab B2 with quarter value if provided
             if quarter_value:
@@ -373,7 +500,7 @@ class GoogleSheetsService:
                     self.sheets_service.values().update(
                         spreadsheetId=test_sheet_id,
                         range="Summary!B2",
-                        valueInputOption='RAW',
+                        valueInputOption='USER_ENTERED',
                         body={'values': [[quarter_value]]}
                     ).execute()
                     logger.info(f"Updated Test sheet Summary tab B2 with quarter value: {quarter_value}")
@@ -409,7 +536,7 @@ class GoogleSheetsService:
             self.sheets_service.values().append(
                 spreadsheetId=self.sheet_id,
                 range=range_name,
-                valueInputOption='RAW',
+                valueInputOption='USER_ENTERED',
                 body=body
             ).execute()
             
