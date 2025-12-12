@@ -216,6 +216,16 @@ class PipelineService:
                 await self._log(log_file, f"[{datetime.now()}] Waiting for Test sheet formulas to calculate...")
                 await asyncio.sleep(5)  # Wait 5 seconds for formulas
                 
+                # Step 5.4: Copy data from Raw_Data to Facility_Data tab
+                await self._log(log_file, f"[{datetime.now()}] Step 5.4: Copying data from Raw_Data to Facility_Data tab...")
+                copy_success = await self.sheets_service.copy_raw_data_to_facility_data()
+                if copy_success:
+                    await self._log(log_file, f"[{datetime.now()}] [OK] Data copied to Facility_Data tab")
+                    results["steps_completed"].append("facility_data_update")
+                    self._set_progress(job_id, 80, "Facility Data updated")
+                else:
+                    await self._log(log_file, f"[{datetime.now()}] [WARNING] Failed to copy data to Facility_Data tab")
+                
                 # Step 5.5: Generate Test Fac PDF using Apps Script
                 await self._log(log_file, f"[{datetime.now()}] Step 5.5: Generating Test Fac PDF via Apps Script...")
                 test_fac_pdf_result = await self.apps_script_service.generate_test_fac_pdf()
