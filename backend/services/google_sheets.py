@@ -517,6 +517,200 @@ class GoogleSheetsService:
             logger.error(f"Error copying to Test sheet: {e}")
             return False
     
+    async def copy_raw_data_to_facility_data(self) -> bool:
+        """
+        Copy 6 columns from Raw_Data tab to Facility_Data tab in Test Fac sheet.
+        Column structure in Facility_Data:
+        - Column A: Facilities (facility names from Raw_Data)
+        - Column B: Managed Care Average LOS (from Raw_Data "LOS Man Avg")
+        - Column C: Medicare A Average LOS (from Raw_Data "LOS Med Avg")
+        - Column D: Section GG Improv (from Raw_Data "INC")
+        - Column E: 5 Day Mean (from Raw_Data "GS")
+        - Column F: End of PPS Mean (from Raw_Data "PPS")
+        
+        Clears only A1:A9 and F1:F9 in Facility_Data tab (preserves graphs).
+        Copies all facilities from Raw_Data.
+        Adds "Network Average" row at the end with averages for columns B-F.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.sheets_service:
+            logger.warning("Google Sheets service not available")
+            return False
+        
+        try:
+            # Test sheet configuration
+            test_sheet_id = "1FvZLxUS36JON-O8yY6zvrxxYyfOMHtHzmKAWUd5ytZk"
+            raw_data_tab = "Raw_Data"
+            facility_data_tab = "Facility_Data"
+            
+            # Column mapping: (source_col_name_in_raw_data, dest_column_letter)
+            column_mapping = [
+                ("LOS Man Avg", "B"),  # Managed Care Average LOS
+                ("LOS Med Avg", "C"),  # Medicare A Average LOS
+                ("INC", "D"),          # Section GG Improv
+                ("GS", "E"),          # 5 Day Mean
+                ("PPS", "F")          # End of PPS Mean
+            ]
+            
+            # Read Raw_Data tab
+            logger.info(f"Reading data from {raw_data_tab} tab")
+            raw_data = self.sheets_service.values().get(
+                spreadsheetId=test_sheet_id,
+                range=f"{raw_data_tab}!A:AC"
+            ).execute()
+            
+            raw_values = raw_data.get('values', [])
+            if not raw_values or len(raw_values) < 2:
+                logger.warning(f"No data found in {raw_data_tab} tab (need at least header + 1 row)")
+                return False
+            
+            # Get headers from Raw_Data
+            raw_headers = raw_values[0]
+            raw_data_rows = raw_values[1:]  # Skip header
+            
+            # Find Facility column index in Raw_Data
+            try:
+                facility_col_idx = raw_headers.index("Facility")
+            except ValueError:
+                logger.error("'Facility' column not found in Raw_Data")
+                return False
+            
+            # Find source column indices for the mapped columns
+            source_col_indices = {}
+            for source_col, _ in column_mapping:
+                try:
+                    idx = raw_headers.index(source_col)
+                    source_col_indices[source_col] = idx
+                    logger.info(f"Found source column '{source_col}' at index {idx}")
+                except ValueError:
+                    logger.warning(f"Source column '{source_col}' not found in Raw_Data headers")
+                    return False
+            
+            # Clear A1:F9 in Facility_Data tab (user requested full A-F rows 1-9)
+            logger.info(f"Clearing data range A1:F9 in {facility_data_tab} tab (preserving graphs outside this range)")
+            self.sheets_service.values().clear(
+                spreadsheetId=test_sheet_id,
+                range=f"{facility_data_tab}!A1:F9"
+            ).execute()
+            
+            # Write headers in row 1 if needed (or update them)
+            headers = ["Facilities", "Managed Care Average LOS", "Medicare A Average LOS", 
+                      "Section GG Improv", "5 Day Mean", "End of PPS Mean"]
+            self.sheets_service.values().update(
+                spreadsheetId=test_sheet_id,
+                range=f"{facility_data_tab}!A1:F1",
+                valueInputOption='USER_ENTERED',
+                body={'values': [headers]}
+            ).execute()
+            logger.info("Updated headers in Facility_Data tab")
+            
+            # Prepare data rows: collect all facility data from Raw_Data
+            data_rows = []
+            numeric_values = {dest_col: [] for _, dest_col in column_mapping}
+            
+            for row in raw_data_rows:
+                if len(row) <= facility_col_idx:
+                    continue
+                
+                facility_name = row[facility_col_idx] if len(row) > facility_col_idx else ""
+                if not facility_name or str(facility_name).strip() == "":
+                    continue
+                
+                # Build row data: [Facility, LOS Man Avg, LOS Med Avg, INC, GS, PPS]
+                row_data = [facility_name]
+                
+                for source_col, dest_col in column_mapping:
+                    source_idx = source_col_indices[source_col]
+                    value = ""
+                    if len(row) > source_idx:
+                        value = row[source_idx]
+                        # Convert to number if possible for averaging
+                        try:
+                            if value and str(value).strip() != "":
+                                num_value = float(value)
+                                numeric_values[dest_col].append(num_value)
+                        except (ValueError, TypeError):
+                            pass
+                    row_data.append(value)
+                
+                data_rows.append(row_data)
+            
+            if not data_rows:
+                logger.warning("No facility data to copy from Raw_Data")
+                return False
+            
+            logger.info(f"Prepared {len(data_rows)} facility rows to copy")
+            
+            # Write all data rows starting from row 2 (row 1 is headers)
+            # Write in batches to avoid API limits
+            batch_size = 100
+            for i in range(0, len(data_rows), batch_size):
+                batch = data_rows[i:i + batch_size]
+                start_row = i + 2  # Row 2, 3, 4, etc.
+                end_row = start_row + len(batch) - 1
+                
+                self.sheets_service.values().update(
+                    spreadsheetId=test_sheet_id,
+                    range=f"{facility_data_tab}!A{start_row}:F{end_row}",
+                    valueInputOption='USER_ENTERED',
+                    body={'values': batch}
+                ).execute()
+            
+            logger.info(f"Copied {len(data_rows)} facilities to {facility_data_tab} tab")
+            
+            # Add "Network Average" row at the end
+            network_avg_row = len(data_rows) + 2  # After all data rows, row 1 is header
+            
+            # Write "Network Average" label in column A
+            self.sheets_service.values().update(
+                spreadsheetId=test_sheet_id,
+                range=f"{facility_data_tab}!A{network_avg_row}",
+                valueInputOption='USER_ENTERED',
+                body={'values': [["Network Average"]]}
+            ).execute()
+            
+            # Calculate and write averages for columns B-F
+            avg_row_data = ["Network Average"]
+            for source_col, dest_col in column_mapping:
+                if dest_col in numeric_values and numeric_values[dest_col]:
+                    avg_value = sum(numeric_values[dest_col]) / len(numeric_values[dest_col])
+                    avg_row_data.append(avg_value)
+                    logger.info(f"Network Average for '{dest_col}': {avg_value:.2f}")
+                else:
+                    avg_row_data.append("")
+            
+            # Write averages to columns B-F
+            self.sheets_service.values().update(
+                spreadsheetId=test_sheet_id,
+                range=f"{facility_data_tab}!B{network_avg_row}:F{network_avg_row}",
+                valueInputOption='USER_ENTERED',
+                body={'values': [avg_row_data[1:]]}  # Skip first element (label)
+            ).execute()
+            
+            logger.info(f"Added Network Average row at row {network_avg_row}")
+            return True
+            
+        except HttpError as e:
+            logger.error(f"HTTP error copying Raw_Data to Facility_Data: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error copying Raw_Data to Facility_Data: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    def _column_index_to_letter(self, col_idx: int) -> str:
+        """Convert 0-based column index to Excel column letter (A, B, ..., Z, AA, AB, ...)"""
+        result = ""
+        col_idx += 1  # Convert to 1-based
+        while col_idx > 0:
+            col_idx -= 1
+            result = chr(65 + (col_idx % 26)) + result
+            col_idx //= 26
+        return result
+    
     async def append_data(self, data: list, sheet_name: Optional[str] = None) -> bool:
         """
         Append data to Google Sheets
