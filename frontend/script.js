@@ -445,7 +445,7 @@ async function showResults(jobId, status) {
                 link.href = linksData.test_fac_sheets;
                 link.target = '_blank';
                 link.className = 'drive-link';
-                link.textContent = '📊 Test Fac';
+                link.textContent = '📊 Facility Dashboard';
                 sheetsContainer.appendChild(link);
             }
             
@@ -485,13 +485,13 @@ async function showResults(jobId, status) {
                     link.href = linksData.test_fac_pdf;
                     link.target = '_blank';
                     link.className = 'drive-link';
-                    link.textContent = '📄 Test Fac PDF';
+                    link.textContent = '📄 Facility Dashboard PDF';
                     pdfContainer.appendChild(link);
                 } else {
                     // If it's just a message, show it as text with a note
                     const text = document.createElement('span');
                     text.className = 'drive-link';
-                    text.textContent = `📄 Test Fac PDF: ${linksData.test_fac_pdf}`;
+                    text.textContent = `📄 Facility Dashboard PDF: ${linksData.test_fac_pdf}`;
                     pdfContainer.appendChild(text);
                 }
             }
