@@ -247,12 +247,29 @@ class GoogleSheetsService:
                 
                 # Populate GS, PPS, INC values for each facility
                 if 'Facility' in df.columns:
+                    # Log all facility names in CSV for debugging
+                    unique_facilities = df['Facility'].unique()
+                    logger.info(f"Facilities found in CSV: {list(unique_facilities)}")
+                    logger.info(f"Facility values to match: {list(facility_values.keys())}")
+                    
                     for facility_name, values in facility_values.items():
                         # Skip special keys like '_quarter'
                         if facility_name.startswith('_'):
                             continue
-                        # Match facility name (case-insensitive, handle variations)
-                        mask = df['Facility'].str.contains(facility_name, case=False, na=False)
+                        
+                        # Try multiple matching strategies
+                        # 1. Exact match (case-insensitive)
+                        mask_exact = df['Facility'].str.lower().str.strip() == facility_name.lower().strip()
+                        # 2. Contains match (facility_name in CSV facility)
+                        mask_contains = df['Facility'].str.contains(facility_name, case=False, na=False)
+                        # 3. Reverse contains (CSV facility in facility_name) - for partial matches
+                        mask_reverse = df['Facility'].apply(
+                            lambda x: facility_name.lower() in str(x).lower() if pd.notna(x) else False
+                        )
+                        
+                        # Combine all matches
+                        mask = mask_exact | mask_contains | mask_reverse
+                        
                         if mask.any():
                             if 'GS' in values:
                                 df.loc[mask, 'GS'] = values['GS']
@@ -260,7 +277,10 @@ class GoogleSheetsService:
                                 df.loc[mask, 'PPS'] = values['PPS']
                             if 'INC' in values:
                                 df.loc[mask, 'INC'] = values['INC']
-                            logger.info(f"Populated GS, PPS, INC for {facility_name}: {mask.sum()} rows")
+                            matched_facilities = df.loc[mask, 'Facility'].unique().tolist()
+                            logger.info(f"Populated GS, PPS, INC for '{facility_name}': matched {mask.sum()} rows with facilities: {matched_facilities}")
+                        else:
+                            logger.warning(f"No match found for facility '{facility_name}' in CSV. Available facilities: {list(unique_facilities)}")
                 else:
                     logger.warning("'Facility' column not found in CSV, cannot populate facility-specific values")
             
@@ -740,4 +760,3 @@ class GoogleSheetsService:
         except Exception as e:
             logger.error(f"Error appending data to Sheets: {e}")
             return False
-
