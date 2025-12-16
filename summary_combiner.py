@@ -159,11 +159,26 @@ def extract_facility_name_from_combined_file(filename: str) -> str:
         return 'Medilodge of Wyoming'
     elif 'Grand Rapids' in display_name:
         return 'Medilodge of Grand Rapids'
+    elif 'Grand Blanc' in display_name:
+        return 'Medilodge of Grand Blanc'
+    elif 'Monroe' in display_name:
+        return 'Medilodge of Monroe'
+    elif 'Autumn Woods' in display_name or 'Autumn' in display_name:
+        # Non-Medilodge facility - return as-is without prefix
+        formatted_name = display_name.title()
+        formatted_name = formatted_name.replace('St ', 'St. ')
+        formatted_name = formatted_name.replace('Mt ', 'Mt. ')
+        return formatted_name
     else:
         # Default formatting for other facilities
         formatted_name = display_name.title()
         formatted_name = formatted_name.replace('St ', 'St. ')
         formatted_name = formatted_name.replace('Mt ', 'Mt. ')
+        
+        # Check if it's a non-Medilodge facility (e.g., "Autumn Woods Residential")
+        # If the name doesn't contain "medilodge", return it as-is without prefix
+        if 'medilodge' not in name:
+            return formatted_name
         
         # Special case for "at the" facilities
         if 'At The' in formatted_name:
@@ -573,5 +588,7 @@ Examples:
     except Exception as e:
         print(f"[FAILED] Error: {e}")
         sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
