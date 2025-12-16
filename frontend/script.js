@@ -146,14 +146,29 @@ function detectFacilitiesAndShowInputs() {
             facilityName = 'Medilodge of Mt. Pleasant';
         } else if (name.includes('grand rapids')) {
             facilityName = 'Medilodge of Grand Rapids';
+        } else if (name.includes('monroe')) {
+            facilityName = 'Medilodge of Monroe';
+        } else if (name.includes('grand blanc')) {
+            facilityName = 'Medilodge of Grand Blanc';
         } else {
-            // Generic pattern: extract from "ADT Medilodge of X Q3.pdf"
-            const medilodgeMatch = name.match(/medilodge\s+(?:of\s+)?([^.\s]+(?:\s+[^.\s]+)*?)(?:\s+q\d+|\s*$)/i);
-            if (medilodgeMatch) {
-                const facilityPart = medilodgeMatch[1].trim();
-                facilityName = 'Medilodge of ' + facilityPart.split(/\s+/).map(w => 
-                    w.charAt(0).toUpperCase() + w.slice(1)
+            // Generic pattern 1: extract from "ADT report [FACILITY NAME] Q3.pdf"
+            // This handles formats like "ADT report autumn woods residential Q3"
+            const genericMatch = name.match(/adt\s+report\s+(.+?)(?:\s+q\d+|\s*\.|$)/i);
+            if (genericMatch) {
+                const facilityPart = genericMatch[1].trim();
+                // Capitalize each word properly
+                facilityName = facilityPart.split(/\s+/).map(w => 
+                    w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
                 ).join(' ');
+            } else {
+                // Generic pattern 2: extract from "ADT Medilodge of X Q3.pdf"
+                const medilodgeMatch = name.match(/medilodge\s+(?:of\s+)?([^.\s]+(?:\s+[^.\s]+)*?)(?:\s+q\d+|\s*$)/i);
+                if (medilodgeMatch) {
+                    const facilityPart = medilodgeMatch[1].trim();
+                    facilityName = 'Medilodge of ' + facilityPart.split(/\s+/).map(w => 
+                        w.charAt(0).toUpperCase() + w.slice(1)
+                    ).join(' ');
+                }
             }
         }
         
