@@ -599,7 +599,7 @@ def extract_facility_name_from_filename(filename: str, file_type: str) -> str:
     name = Path(filename).stem.lower()
     
     if file_type == 'adt':
-        # Handle ADT files like "ADT Medilodge at the Shore_cycles" or "ADT-Medilode-Farmington"
+        # Handle ADT files like "ADT Medilodge at the Shore_cycles" or "ADT report Autumn Woods Residential Q3_cycles"
         # Remove ADT prefix (handle both space and underscore cases)
         if name.startswith('adt '):
             name = name[4:]  # Remove "adt "
@@ -611,7 +611,15 @@ def extract_facility_name_from_filename(filename: str, file_type: str) -> str:
         # Remove _cycles suffix
         name = name.replace('_cycles', '')
         
-        # Remove "medilodge" prefix
+        # Remove "report" prefix if present (e.g., "report autumn woods residential q3" -> "autumn woods residential q3")
+        if name.startswith('report '):
+            name = name[7:]  # Remove "report "
+        elif name.startswith('report-'):
+            name = name[7:]  # Remove "report-"
+        elif name.startswith('report_'):
+            name = name[7:]  # Remove "report_"
+        
+        # Remove "medilodge" prefix (only if present, for non-Medilodge facilities this won't match)
         if name.startswith('medilodge '):
             name = name[10:]  # Remove "medilodge "
         elif name.startswith('medilodge-'):
@@ -713,12 +721,13 @@ def normalize_facility_name_for_matching(facility_name: str) -> str:
 def format_facility_name_for_display(facility_name: str) -> str:
     """
     Format facility name for display with proper Medilodge prefix.
+    Handles both Medilodge and non-Medilodge facilities.
     
     Args:
         facility_name: The normalized facility name from extraction
     
     Returns:
-        Properly formatted facility name with Medilodge prefix
+        Properly formatted facility name (with Medilodge prefix if applicable)
     """
     # Convert back from normalized format to readable format
     display_name = facility_name.replace('_', ' ')
@@ -746,6 +755,10 @@ def format_facility_name_for_display(facility_name: str) -> str:
         return 'Medilodge of Wyoming'
     elif display_name == 'grand rapids':
         return 'Medilodge of Grand Rapids'
+    elif display_name == 'grand blanc':
+        return 'Medilodge of Grand Blanc'
+    elif display_name == 'monroe':
+        return 'Medilodge of Monroe'
     else:
         # Default formatting for other facilities
         # Handle special cases for abbreviations
@@ -756,6 +769,20 @@ def format_facility_name_for_display(facility_name: str) -> str:
         # Remove "of " prefix if it was left from ADT extraction
         if formatted_name.startswith('Of '):
             formatted_name = formatted_name[3:]
+        
+        # Check if this is a non-Medilodge facility (multi-word names that don't match Medilodge patterns)
+        # Known non-Medilodge facilities or names with 3+ words are likely non-Medilodge
+        words = formatted_name.split()
+        is_likely_non_medilodge = (
+            len(words) >= 3 or  # Multi-word names like "Autumn Woods Residential"
+            'autumn' in display_name.lower() or
+            'woods' in display_name.lower() or
+            'residential' in display_name.lower()
+        )
+        
+        if is_likely_non_medilodge:
+            # Return as-is without Medilodge prefix
+            return formatted_name
         
         # Special case for "at the" facilities
         if 'At The' in formatted_name:
