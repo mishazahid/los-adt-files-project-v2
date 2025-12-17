@@ -131,7 +131,7 @@ def load_visit_files_from_folder(folder_path, description):
                 try:
                     df = pd.read_excel(file_path)
                 except Exception as e:
-                    print(f"  ⚠ Warning: Could not read {file_path.name}: {e}")
+                    print(f"  [WARNING] Could not read {file_path.name}: {e}")
                     continue
             
             dataframes.append(df)
@@ -477,7 +477,7 @@ def export_summarized_data(df, output_path, facility_name):
         summarized_df = pd.DataFrame(summarized_data)
         
         # Save to CSV
-        summarized_df.to_csv(output_path, index=False)
+        summarized_df.to_csv(output_path, index=False, encoding='utf-8')
         
         print(f"[OK] Summarized data saved to: {output_path}")
         print(f"  Summary metrics:")
@@ -521,8 +521,8 @@ def save_output(df, output_path):
         output_dir = Path(output_path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save to CSV
-        df.to_csv(output_path, index=False)
+        # Save to CSV with UTF-8 encoding to avoid encoding errors
+        df.to_csv(output_path, index=False, encoding='utf-8')
         
         print(f"[OK] Output saved to: {output_path}")
         print(f"  Final shape: {df.shape[0]} rows, {df.shape[1]} columns")
@@ -655,8 +655,16 @@ def extract_facility_name_from_filename(filename: str, file_type: str) -> str:
     # Remove quarter suffixes (q3, q2, q1, q4) - case insensitive, with optional spaces
     name = re.sub(r'\s*(q[1-4]|quarter\s*[1-4])\s*$', '', name, flags=re.IGNORECASE)
     
-    # Remove facility type suffixes (snf, ltc, etc.) - case insensitive
-    name = re.sub(r'\s*(snf|ltc|facility|center|home)\s*$', '', name, flags=re.IGNORECASE)
+    # Remove facility type suffixes (snf, ltc, health care, llc, etc.) - case insensitive
+    # Remove multiple suffixes iteratively to handle cases like "health care llc"
+    suffix_patterns = [
+        r'\s*health\s*care\s*llc\s*$',  # "health care llc" as a unit
+        r'\s*health\s*care\s*$',        # "health care" alone
+        r'\s*llc\s*$',                   # "llc" alone
+        r'\s*(snf|ltc|facility|center|home)\s*$'  # other facility types
+    ]
+    for pattern in suffix_patterns:
+        name = re.sub(pattern, '', name, flags=re.IGNORECASE).strip()
     
     # Normalize Mt. Pleasant variations (m. pleasant, mt. pleasant, mt pleasant -> mt pleasant)
     name = re.sub(r'\bm\.?\s*pleasant\b', 'mt pleasant', name, flags=re.IGNORECASE)
@@ -809,9 +817,18 @@ def find_matching_files(adt_folder: str, patient_folder: str, visit_folder: str)
     adt_files = find_csv_files_in_folder(adt_folder, ['adt', 'cycle'])
     all_adt_files = sorted(list(set(adt_files.get('adt', []) + adt_files.get('cycle', []))))
     
-    # Find all patient files (deduplicate in case files match multiple patterns)
+    # Find all patient files - search for all CSV files in the folder
+    # (not just those matching 'patient' or 'medilodge' patterns, to catch non-Medilodge facilities)
+    patient_folder_path = Path(patient_folder)
+    all_patient_files = sorted(list(patient_folder_path.glob("*.csv")))
+    all_patient_files = [str(f) for f in all_patient_files]
+    
+    # Also try pattern-based search as fallback for subdirectories
     patient_files = find_csv_files_in_folder(patient_folder, ['patient', 'medilodge'])
-    all_patient_files = sorted(list(set(patient_files.get('patient', []) + patient_files.get('medilodge', []))))
+    pattern_based_files = sorted(list(set(patient_files.get('patient', []) + patient_files.get('medilodge', []))))
+    
+    # Combine both lists and remove duplicates
+    all_patient_files = sorted(list(set(all_patient_files + pattern_based_files)))
     
     # Visit folder can contain multiple files - we'll pass the folder path directly
     # Check if visit_folder exists (can be a file or folder)
@@ -975,7 +992,7 @@ def process_file_combination(adt_file: str, patient_file: str, visit_file_or_fol
     print(f"[OK] Filtered data: {filtered_count} Puzzle Patients (excluded {excluded_count} non-Puzzle Patients)")
     
     if filtered_count == 0:
-        print("⚠ Warning: No Puzzle Patients found after filtering. Output files will be empty.")
+        print("[WARNING] No Puzzle Patients found after filtering. Output files will be empty.")
     
     # Save output
     save_output(final_df, output_file)
