@@ -475,7 +475,8 @@ def parse_section_with_python(lines, section_start, section_end, section_name, k
     # Pattern to match patient entries: "Last, First (ID) Date"
     # Strategy: Find the ID pattern first, then extract name before it
     # This avoids matching location text as part of the name
-    id_pattern = re.compile(r'\((\d{4,6})\)\s+(\d{1,2}/\d{1,2}/\d{4})$')
+    # Updated to support both numeric IDs (e.g., 310072) and alphanumeric IDs (e.g., MGB404400)
+    id_pattern = re.compile(r'\(([A-Z0-9]{4,10})\)\s+(\d{1,2}/\d{1,2}/\d{4})$')
     
     # Helper function to extract patient info from a line
     def extract_patient_from_line(line_text):
