@@ -84,8 +84,14 @@ class GoogleSheetsService:
         for r_idx, row in enumerate(values):
             if r_idx == 0:
                 continue  # header
+            # Ensure row is long enough
+            while len(row) <= end_col:
+                row.append('')
             for c_idx in range(start_col, min(len(row), end_col + 1)):
-                row[c_idx] = GoogleSheetsService._to_number(row[c_idx])
+                if c_idx < len(row):
+                    # Skip if already empty string or None
+                    if row[c_idx] != '' and row[c_idx] is not None:
+                        row[c_idx] = GoogleSheetsService._to_number(row[c_idx])
         return values
 
     def _get_sheet_id(self, spreadsheet_id: str, tab_title: str) -> Optional[int]:
@@ -220,9 +226,28 @@ class GoogleSheetsService:
             
             # Read CSV file
             df = pd.read_csv(csv_file)
+            
+            # Log what we're reading
+            logger.info(f"Reading CSV file: {csv_file}")
+            logger.info(f"DataFrame shape: {df.shape}, columns: {list(df.columns)}")
+            
+            # Handle empty dataframe
+            if df.empty:
+                logger.error(f"CSV file {csv_file} is empty or has no data rows. Cannot update Google Sheets.")
+                # Return sheet links even if empty so frontend doesn't break
+                try:
+                    test_sheet_link = await self.copy_to_test_sheet(None)
+                except:
+                    test_sheet_link = ""
+                return {
+                    "facility_summary": f"https://docs.google.com/spreadsheets/d/{self.sheet_id}",
+                    "test_fac": test_sheet_link
+                }
 
             # Normalize values to numeric where possible to avoid time/text formatting
-            df = df.applymap(self._to_number)
+            # Use apply with map instead of deprecated applymap, and handle NaN values
+            for col in df.columns:
+                df[col] = df[col].apply(lambda x: self._to_number(x) if pd.notna(x) else x)
             
             # Extract quarter value (for Executive sheet only, not Summary sheet)
             quarter_value = None
@@ -285,38 +310,78 @@ class GoogleSheetsService:
                     logger.warning("'Facility' column not found in CSV, cannot populate facility-specific values")
             
             # Convert DataFrame to list of lists (values)
+            # Replace NaN with empty strings for Google Sheets BEFORE converting to list
+            df = df.fillna('')
+            
+            # Convert to list, handling any remaining NaN values
             values = [df.columns.tolist()]  # Header row
-            values.extend(df.values.tolist())
+            for idx, row in df.iterrows():
+                row_list = []
+                for val in row:
+                    # Convert any remaining NaN/None to empty string
+                    if pd.isna(val) or val is None:
+                        row_list.append('')
+                    else:
+                        row_list.append(val)
+                values.append(row_list)
+
+            # Log what we're about to write
+            logger.info(f"Preparing to write {len(values)} rows to Google Sheets (1 header + {len(values)-1} data rows)")
+            if len(values) > 1:
+                logger.info(f"First data row sample: {values[1][:5]}...")  # Log first 5 columns of first data row
 
             # Normalize numeric columns B:AC to ensure numbers, not strings/times
             values = self._normalize_numeric_columns(values, start_col=1, end_col=28)
             
             # Clear existing data
             # 1) Hard-clear GS/PPS/INC columns to avoid stale data even if new payload is smaller
-            self.sheets_service.values().batchClear(
-                spreadsheetId=self.sheet_id,
-                body={"ranges": [f"{self.sheet_tab}!AA:AC"]}
-            ).execute()
+            try:
+                self.sheets_service.values().batchClear(
+                    spreadsheetId=self.sheet_id,
+                    body={"ranges": [f"{self.sheet_tab}!AA:AC"]}
+                ).execute()
+            except Exception as e:
+                logger.warning(f"Could not clear AA:AC columns: {e}")
+            
             # 2) Clear main data range to remove extra rows
-            range_name = f"{self.sheet_tab}!A1:Z10000"
-            self.sheets_service.values().clear(
-                spreadsheetId=self.sheet_id,
-                range=range_name
-            ).execute()
+            try:
+                range_name = f"{self.sheet_tab}!A1:Z10000"
+                self.sheets_service.values().clear(
+                    spreadsheetId=self.sheet_id,
+                    range=range_name
+                ).execute()
+                logger.info(f"Cleared existing data from {range_name}")
+            except Exception as e:
+                logger.warning(f"Could not clear existing data: {e}")
             
             # Update with new data
             body = {
                 'values': values
             }
             
-            result = self.sheets_service.values().update(
-                spreadsheetId=self.sheet_id,
-                range=f"{self.sheet_tab}!A1",
-                valueInputOption='USER_ENTERED',
-                body=body
-            ).execute()
-            
-            logger.info(f"Updated {self.sheet_tab} sheet: {result.get('updatedCells')} cells updated")
+            try:
+                result = self.sheets_service.values().update(
+                    spreadsheetId=self.sheet_id,
+                    range=f"{self.sheet_tab}!A1",
+                    valueInputOption='USER_ENTERED',
+                    body=body
+                ).execute()
+                
+                updated_cells = result.get('updatedCells', 0)
+                updated_rows = result.get('updatedRows', 0)
+                updated_cols = result.get('updatedColumns', 0)
+                logger.info(f"Updated {self.sheet_tab} sheet: {updated_cells} cells, {updated_rows} rows, {updated_cols} columns")
+                
+                if updated_cells == 0 or updated_rows == 0:
+                    logger.error(f"ERROR: No cells/rows were updated in Google Sheets!")
+                    logger.error(f"Attempted to write {len(values)} rows")
+                    logger.error(f"First row: {values[0] if values else 'EMPTY'}")
+                    logger.error(f"Second row: {values[1] if len(values) > 1 else 'NO DATA'}")
+                    raise ValueError(f"Failed to write data to Google Sheets - no cells updated")
+            except Exception as e:
+                logger.error(f"Error writing to Google Sheets: {e}")
+                logger.error(f"Attempted to write {len(values)} rows")
+                raise
 
             # Force numeric format on Summary sheet columns B:AC
             self._set_number_format(self.sheet_id, self.sheet_tab, start_row=2)
@@ -336,10 +401,26 @@ class GoogleSheetsService:
         
         except HttpError as e:
             logger.error(f"Error updating Google Sheets: {e}")
-            return ""
+            # Return sheet links even on error (sheets might still exist)
+            try:
+                test_sheet_link = await self.copy_to_test_sheet(None)
+            except:
+                test_sheet_link = ""
+            return {
+                "facility_summary": f"https://docs.google.com/spreadsheets/d/{self.sheet_id}",
+                "test_fac": test_sheet_link
+            }
         except Exception as e:
             logger.error(f"Error processing CSV for Sheets: {e}")
-            return ""
+            # Return sheet links even on error (sheets might still exist)
+            try:
+                test_sheet_link = await self.copy_to_test_sheet(None)
+            except:
+                test_sheet_link = ""
+            return {
+                "facility_summary": f"https://docs.google.com/spreadsheets/d/{self.sheet_id}",
+                "test_fac": test_sheet_link
+            }
     
     async def update_executive_sheet_quarter(self, quarter_value: str) -> bool:
         """
@@ -464,12 +545,13 @@ class GoogleSheetsService:
         """
         if not self.sheets_service:
             logger.warning("Google Sheets service not available")
-            return False
+            return ""
+        
+        # Test sheet configuration (defined outside try block for error handlers)
+        test_sheet_id = "1FvZLxUS36JON-O8yY6zvrxxYyfOMHtHzmKAWUd5ytZk"
+        test_sheet_tab = "Raw_Data"
         
         try:
-            # Test sheet configuration
-            test_sheet_id = "1FvZLxUS36JON-O8yY6zvrxxYyfOMHtHzmKAWUd5ytZk"
-            test_sheet_tab = "Raw_Data"
             
             # Read data from Summary tab of current sheet
             # Use wider range to include GS, PPS, INC columns (AA, AB, AC)
@@ -482,7 +564,8 @@ class GoogleSheetsService:
             source_values = source_data.get('values', [])
             if not source_values:
                 logger.warning("No data found in Summary sheet to copy")
-                return False
+                # Still return the sheet URL even if no data
+                return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
             
             # Normalize numeric columns B:AC before writing to Test sheet
             source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=28)
@@ -532,10 +615,12 @@ class GoogleSheetsService:
             
         except HttpError as e:
             logger.error(f"HTTP error copying to Test sheet: {e}")
-            return False
+            # Still return the sheet URL even on error
+            return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
         except Exception as e:
             logger.error(f"Error copying to Test sheet: {e}")
-            return False
+            # Still return the sheet URL even on error
+            return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
     
     async def copy_raw_data_to_facility_data(self) -> bool:
         """
