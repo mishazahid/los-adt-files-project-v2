@@ -40,7 +40,7 @@ class PipelineService:
         self.los_script = self.project_root / "los-generate.py"
         self.combiner_script = self.project_root / "csv_combiner-test.py"
         self.summary_script = self.project_root / "summary_combiner.py"
-
+        
         # Thread pool executor for running scripts (Windows compatible)
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
@@ -196,9 +196,66 @@ class PipelineService:
             await self._log(log_file, f"[{datetime.now()}] Step 5: Updating Google Sheets...")
             master_summary_path = summary_dir / "master_summary.csv"
             if master_summary_path.exists():
-                # Get facility values from job status if available
+                # Get facility values from job status if available (for quarter)
                 from backend.config import job_status
-                facility_values = job_status.get(job_id, {}).get("facility_values", {})
+                manual_facility_values = job_status.get(job_id, {}).get("facility_values", {})
+                
+                # Auto-fetch GS, PPS, INC from Google Sheet
+                await self._log(log_file, f"[{datetime.now()}] Step 5.1: Auto-fetching GS, PPS, INC from Google Sheet...")
+                try:
+                    # Read facility names from master_summary.csv
+                    import pandas as pd
+                    df = pd.read_csv(master_summary_path)
+                    facility_names = df['Facility'].unique().tolist() if 'Facility' in df.columns else []
+                    
+                    if facility_names:
+                        # Get Google Sheet ID or file from job status (user-provided or default)
+                        from backend.config import job_status
+                        job_data = job_status.get(job_id, {})
+                        user_sheet_id = job_data.get("google_sheet_id")
+                        google_sheet_file = job_data.get("google_sheet_file")
+                        
+                        await self._log(log_file, f"[{datetime.now()}] Google Sheet source - ID: {user_sheet_id}, File: {google_sheet_file}")
+                        
+                        # Fetch metrics from Google Sheet or uploaded file
+                        if google_sheet_file:
+                            # Read from uploaded file
+                            await self._log(log_file, f"[{datetime.now()}] Reading metrics from uploaded file: {google_sheet_file}")
+                            auto_metrics = self.sheets_service.fetch_facility_metrics_from_file(
+                                facility_names, 
+                                file_path=google_sheet_file
+                            )
+                        elif user_sheet_id:
+                            # Fetch from Google Sheet using provided ID
+                            await self._log(log_file, f"[{datetime.now()}] Reading metrics from Google Sheet ID: {user_sheet_id}")
+                            auto_metrics = self.sheets_service.fetch_facility_metrics(facility_names, sheet_id=user_sheet_id)
+                        else:
+                            # Use default from env var
+                            await self._log(log_file, f"[{datetime.now()}] Using default Google Sheet from env var")
+                            auto_metrics = self.sheets_service.fetch_facility_metrics(facility_names, sheet_id=None)
+                        
+                        # Combine auto-fetched metrics with manual quarter value
+                        facility_values = {}
+                        for facility_name in facility_names:
+                            if facility_name in auto_metrics:
+                                facility_values[facility_name] = auto_metrics[facility_name]
+                                metrics = auto_metrics[facility_name]
+                                await self._log(log_file, f"[{datetime.now()}] Auto-fetched for {facility_name}: GS={metrics.get('GS', 'N/A')}, PPS={metrics.get('PPS', 'N/A')}, INC={metrics.get('INC', 'N/A')}")
+                            else:
+                                await self._log(log_file, f"[{datetime.now()}] [WARNING] Could not fetch metrics for {facility_name}")
+                        
+                        # Add quarter from manual input if provided
+                        if manual_facility_values and '_quarter' in manual_facility_values:
+                            facility_values['_quarter'] = manual_facility_values['_quarter']
+                            await self._log(log_file, f"[{datetime.now()}] Using manual quarter value: {manual_facility_values['_quarter']}")
+                    else:
+                        await self._log(log_file, f"[{datetime.now()}] [WARNING] No facilities found in master_summary.csv, using manual values if available")
+                        facility_values = manual_facility_values
+                        
+                except Exception as e:
+                    await self._log(log_file, f"[{datetime.now()}] [WARNING] Error auto-fetching metrics: {e}, falling back to manual values")
+                    facility_values = manual_facility_values
+                
                 sheets_links = await self.sheets_service.update_sheets(master_summary_path, facility_values)
                 # Handle both old format (string) and new format (dict)
                 if isinstance(sheets_links, dict):
