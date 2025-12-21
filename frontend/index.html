@@ -50,13 +50,31 @@
             </div>
 
             <div id="facilityInputsSection" class="facility-inputs-section" style="display: none;">
-                <h3>📋 Facility Values (GS, PPS, INC, Quarter)</h3>
-                <p class="category-desc">Enter values for each facility. These will be added to Google Sheets.</p>
+                <h3>📅 Enter Quarter Value</h3>
+                <p class="category-desc">Enter the quarter value that applies to all facilities.</p>
                 
                 <div id="quarterInputContainer" class="quarter-input-container">
                     <div class="quarter-input-group">
-                        <label class="quarter-label">Quarter (applies to all facilities)</label>
+                        <label class="quarter-label">Quarter</label>
                         <input type="text" id="quarterInput" class="quarter-value-input" placeholder="e.g., Q3 2025" maxlength="20">
+                    </div>
+                </div>
+                
+                <div id="googleSheetInputContainer" class="google-sheet-input-container" style="margin-top: 20px;">
+                    <h3>📊 Google Sheet for GS, PPS, INC Values</h3>
+                    <p class="category-desc">Upload the Google Sheet file that contains facility data with multiple tabs.</p>
+                    
+                    <div class="file-upload-wrapper">
+                        <input type="file" id="googleSheetFile" accept=".xlsx,.xls,.csv" class="file-input-hidden">
+                        <label for="googleSheetFile" class="file-upload-button">
+                            <span class="file-upload-icon">📁</span>
+                            <span class="file-upload-text">Choose Google Sheet File</span>
+                            <span class="file-upload-browse">Browse</span>
+                        </label>
+                        <div id="googleSheetFileName" class="file-name-display" style="display: none;">
+                            <span class="file-name-icon">✓</span>
+                            <span class="file-name-text"></span>
+                        </div>
                     </div>
                 </div>
                 
@@ -134,3 +152,4 @@
     <script src="/static/script.js"></script>
 </body>
 </html>
+
