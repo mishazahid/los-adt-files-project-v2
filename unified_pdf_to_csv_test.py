@@ -2422,8 +2422,8 @@ def process_folder(folder_path, api_key, output_dir, save_json=False, save_text=
     
     # Optionally save batch summary JSON
     if save_summary:
-        batch_summary_file = os.path.join(output_dir, 'batch_processing_summary.json')
-        with open(batch_summary_file, 'w', encoding='utf-8') as f:
+        batch_summary_file = os.path.join(output_dir, "batch_processing_summary.json")
+        with open(batch_summary_file, "w", encoding="utf-8") as f:
             json.dump(batch_summary, f, indent=2, ensure_ascii=False)
     
     return batch_summary
