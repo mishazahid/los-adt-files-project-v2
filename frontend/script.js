@@ -1,0 +1,572 @@
+// Frontend JavaScript for Facility Report Generator
+
+const API_BASE = '/api';
+
+// DOM elements
+const adtInput = document.getElementById('adtFiles');
+const losInput = document.getElementById('losFiles');
+const visitInput = document.getElementById('visitFiles');
+const uploadBtn = document.getElementById('uploadBtn');
+const processingSection = document.getElementById('processingSection');
+const resultsSection = document.getElementById('resultsSection');
+const errorSection = document.getElementById('errorSection');
+
+// File lists
+const adtFileList = document.getElementById('adtFileList');
+const losFileList = document.getElementById('losFileList');
+const visitFileList = document.getElementById('visitFileList');
+
+// Status elements
+const jobIdEl = document.getElementById('jobId');
+const jobStatusEl = document.getElementById('jobStatus');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const logsContainer = document.getElementById('logsContainer');
+const downloadLinks = document.getElementById('downloadLinks');
+const driveLinks = document.getElementById('driveLinks');
+const errorMessage = document.getElementById('errorMessage');
+
+// File arrays
+let adtFiles = [];
+let losFiles = [];
+let visitFiles = [];
+
+// Current job ID
+let currentJobId = null;
+let statusCheckInterval = null;
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    setupFileInputs();
+    setupGoogleSheetUpload();
+    uploadBtn.addEventListener('click', handleUpload);
+    
+    const retryBtn = document.getElementById('retryBtn');
+    if (retryBtn) {
+        retryBtn.addEventListener('click', () => {
+            resetUI();
+        });
+    }
+});
+
+function setupGoogleSheetUpload() {
+    const fileInput = document.getElementById('googleSheetFile');
+    const fileNameDisplay = document.getElementById('googleSheetFileName');
+    const fileNameText = fileNameDisplay.querySelector('.file-name-text');
+    
+    if (fileInput && fileNameDisplay) {
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                const fileName = e.target.files[0].name;
+                fileNameText.textContent = fileName;
+                fileNameDisplay.style.display = 'flex';
+                console.log('Google Sheet file selected:', fileName);
+            } else {
+                fileNameDisplay.style.display = 'none';
+            }
+        });
+    }
+}
+
+function setupFileInputs() {
+    adtInput.addEventListener('change', (e) => {
+        adtFiles = Array.from(e.target.files);
+        updateFileList(adtFileList, adtFiles, 'adt');
+        checkUploadButton();
+    });
+
+    losInput.addEventListener('change', (e) => {
+        losFiles = Array.from(e.target.files);
+        updateFileList(losFileList, losFiles, 'los');
+        checkUploadButton();
+    });
+
+    visitInput.addEventListener('change', (e) => {
+        visitFiles = Array.from(e.target.files);
+        updateFileList(visitFileList, visitFiles, 'visit');
+        checkUploadButton();
+    });
+}
+
+function updateFileList(container, files, type) {
+    container.innerHTML = '';
+    files.forEach((file, index) => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        fileItem.innerHTML = `
+            <span>${file.name}</span>
+            <span class="file-remove" onclick="removeFile('${type}', ${index})">×</span>
+        `;
+        container.appendChild(fileItem);
+    });
+}
+
+function removeFile(type, index) {
+    if (type === 'adt') {
+        adtFiles.splice(index, 1);
+        updateFileList(adtFileList, adtFiles, 'adt');
+        updateFileInput(adtInput, adtFiles);
+    } else if (type === 'los') {
+        losFiles.splice(index, 1);
+        updateFileList(losFileList, losFiles, 'los');
+        updateFileInput(losInput, losFiles);
+    } else if (type === 'visit') {
+        visitFiles.splice(index, 1);
+        updateFileList(visitFileList, visitFiles, 'visit');
+        updateFileInput(visitInput, visitFiles);
+    }
+    checkUploadButton();
+}
+
+function updateFileInput(input, files) {
+    const dt = new DataTransfer();
+    files.forEach(file => dt.items.add(file));
+    input.files = dt.files;
+}
+
+function checkUploadButton() {
+    const hasFiles = adtFiles.length > 0 || losFiles.length > 0 || visitFiles.length > 0;
+    uploadBtn.disabled = !hasFiles;
+    
+    // Detect facilities and show input section
+    if (hasFiles) {
+        detectFacilitiesAndShowInputs();
+    } else {
+        document.getElementById('facilityInputsSection').style.display = 'none';
+    }
+}
+
+function detectFacilitiesAndShowInputs() {
+    const facilities = new Set();
+    const facilityMap = new Map(); // Map normalized name to display name
+    
+    // Only extract facility names from ADT files (not LOS files)
+    adtFiles.forEach(file => {
+        const name = file.name.toLowerCase();
+        let facilityName = null;
+        
+        // Common patterns: "ADT Medilodge of Holland Q3.pdf", etc.
+        if (name.includes('holland')) {
+            facilityName = 'Medilodge of Holland';
+        } else if (name.includes('farmington')) {
+            facilityName = 'Medilodge of Farmington';
+        } else if (name.includes('wyoming')) {
+            facilityName = 'Medilodge of Wyoming';
+        } else if (name.includes('sterling')) {
+            facilityName = 'Medilodge of Sterling Heights';
+        } else if (name.includes('shore')) {
+            facilityName = 'Medilodge at the Shore';
+        } else if (name.includes('sault')) {
+            facilityName = 'Medilodge of Sault St. Marie';
+        } else if (name.includes('clare')) {
+            facilityName = 'Medilodge of Clare';
+        } else if (name.includes('ludington')) {
+            facilityName = 'Medilodge of Ludington';
+        } else if (name.includes('pleasant')) {
+            facilityName = 'Medilodge of Mt. Pleasant';
+        } else if (name.includes('grand rapids')) {
+            facilityName = 'Medilodge of Grand Rapids';
+        } else if (name.includes('monroe')) {
+            facilityName = 'Medilodge of Monroe';
+        } else if (name.includes('grand blanc')) {
+            facilityName = 'Medilodge of Grand Blanc';
+        } else {
+            // Generic pattern 1: extract from "ADT report [FACILITY NAME] Q3.pdf"
+            // This handles formats like "ADT report autumn woods residential Q3"
+            const genericMatch = name.match(/adt\s+report\s+(.+?)(?:\s+q\d+|\s*\.|$)/i);
+            if (genericMatch) {
+                const facilityPart = genericMatch[1].trim();
+                // Capitalize each word properly
+                facilityName = facilityPart.split(/\s+/).map(w => 
+                    w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+                ).join(' ');
+            } else {
+                // Generic pattern 2: extract from "ADT Medilodge of X Q3.pdf"
+                const medilodgeMatch = name.match(/medilodge\s+(?:of\s+)?([^.\s]+(?:\s+[^.\s]+)*?)(?:\s+q\d+|\s*$)/i);
+                if (medilodgeMatch) {
+                    const facilityPart = medilodgeMatch[1].trim();
+                    facilityName = 'Medilodge of ' + facilityPart.split(/\s+/).map(w => 
+                        w.charAt(0).toUpperCase() + w.slice(1)
+                    ).join(' ');
+                }
+            }
+        }
+        
+        if (facilityName) {
+            // Normalize facility name (remove Q3, Q2, etc. and use base name)
+            const normalized = facilityName.replace(/\s+Q\d+\s*$/i, '').trim();
+            
+            // Use normalized name as key, but keep the cleanest display name
+            if (!facilityMap.has(normalized)) {
+                facilityMap.set(normalized, normalized);
+            }
+        }
+    });
+    
+    // Add all unique facilities
+    facilityMap.forEach((displayName) => {
+        facilities.add(displayName);
+    });
+    
+    // If no facilities detected from ADT files, but we have ADT files, show generic inputs
+    if (facilities.size === 0 && adtFiles.length > 0) {
+        facilities.add('Facility 1');
+    }
+    
+    createFacilityInputs(Array.from(facilities).sort());
+}
+
+function createFacilityInputs(facilities) {
+    const container = document.getElementById('facilityInputsContainer');
+    container.innerHTML = '';
+    
+    // GS, PPS, INC are now auto-fetched from Google Sheet, so we don't show input boxes
+    // Only show Quarter input (which is already in the HTML)
+    // We can optionally show a message that GS/PPS/INC will be auto-calculated
+    
+    // Show a message that values will be auto-fetched
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'facility-input-info';
+    infoDiv.style.cssText = 'padding: 10px; margin-bottom: 15px; background-color: #e3f2fd; border-radius: 4px; color: #1976d2;';
+    infoDiv.innerHTML = `
+        <strong>Note:</strong> GS (Global Score), PPS (End of PPS Mean), and INC (Increase in Score) 
+        values will be automatically calculated from the Google Sheet you provide above.
+    `;
+    container.appendChild(infoDiv);
+    
+    document.getElementById('facilityInputsSection').style.display = 'block';
+}
+
+function getFacilityValues() {
+    const values = {};
+    
+    // GS, PPS, INC are now auto-fetched, so we only need to get the quarter value
+    // Get quarter value (single value for all facilities)
+    const quarterInput = document.getElementById('quarterInput');
+    if (quarterInput && quarterInput.value.trim()) {
+        values['_quarter'] = quarterInput.value.trim();
+    }
+    
+    return values;
+}
+
+async function handleUpload() {
+    if (adtFiles.length === 0 && losFiles.length === 0 && visitFiles.length === 0) {
+        alert('Please select at least one file to upload.');
+        return;
+    }
+
+    // Prepare form data
+    const formData = new FormData();
+    
+    adtFiles.forEach(file => {
+        formData.append('adt_files', file);
+    });
+    
+    losFiles.forEach(file => {
+        formData.append('los_files', file);
+    });
+    
+    visitFiles.forEach(file => {
+        formData.append('visit_files', file);
+    });
+    
+    // Add facility values (quarter)
+    const facilityValues = getFacilityValues();
+    if (Object.keys(facilityValues).length > 0) {
+        formData.append('facility_values', JSON.stringify(facilityValues));
+    }
+    
+    // Add Google Sheet file
+    const fileInput = document.getElementById('googleSheetFile');
+    
+    if (fileInput && fileInput.files.length > 0) {
+        console.log('Adding Google Sheet file to form:', fileInput.files[0].name);
+        formData.append('google_sheet_file', fileInput.files[0]);
+    } else {
+        console.log('No Google Sheet file provided');
+    }
+
+    // Show processing section
+    processingSection.style.display = 'block';
+    resultsSection.style.display = 'none';
+    errorSection.style.display = 'none';
+    
+    uploadBtn.disabled = true;
+    uploadBtn.querySelector('.btn-text').textContent = 'Uploading...';
+    
+    try {
+        const response = await fetch(`${API_BASE}/upload/files`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Upload failed');
+        }
+
+        currentJobId = data.job_id;
+        jobIdEl.textContent = currentJobId;
+        jobStatusEl.textContent = 'Uploaded';
+        
+        // Start polling for status
+        startStatusPolling(currentJobId);
+        
+        uploadBtn.querySelector('.btn-text').textContent = 'Upload & Process Files';
+        
+    } catch (error) {
+        showError(error.message);
+        uploadBtn.disabled = false;
+        uploadBtn.querySelector('.btn-text').textContent = 'Upload & Process Files';
+    }
+}
+
+function startStatusPolling(jobId) {
+    // Clear any existing interval
+    if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+    }
+    
+    // Poll immediately
+    checkJobStatus(jobId);
+    
+    // Then poll every 2 seconds
+    statusCheckInterval = setInterval(() => {
+        checkJobStatus(jobId);
+    }, 2000);
+    
+    // Also start log streaming
+    startLogStreaming(jobId);
+}
+
+async function checkJobStatus(jobId) {
+    try {
+        const response = await fetch(`${API_BASE}/status/${jobId}`);
+        const status = await response.json();
+
+        if (!response.ok) {
+            throw new Error(status.detail || 'Failed to get status');
+        }
+
+        // Update status display
+        jobStatusEl.textContent = status.status || 'Unknown';
+        const pct = status.progress || 0;
+        progressBar.style.width = `${pct}%`;
+        progressText.textContent = `${pct}%`;
+
+        // Check if job is complete
+        if (status.status === 'completed') {
+            clearInterval(statusCheckInterval);
+            showResults(jobId, status);
+        } else if (status.status === 'error') {
+            clearInterval(statusCheckInterval);
+            // Get error message from multiple sources
+            let errorMsg = status.message || '';
+            if (status.errors && status.errors.length > 0) {
+                errorMsg = status.errors.join('; ');
+            }
+            if (!errorMsg) {
+                errorMsg = 'Processing failed. Check server logs for details.';
+            }
+            showError(errorMsg);
+        }
+
+    } catch (error) {
+        console.error('Error checking status:', error);
+        // Don't stop polling on individual errors
+    }
+}
+
+async function startLogStreaming(jobId) {
+    try {
+        const response = await fetch(`${API_BASE}/status/${jobId}/logs/tail?lines=100`);
+        const data = await response.json();
+
+        if (data.logs) {
+            logsContainer.innerHTML = '';
+            const lines = data.logs.split('\n');
+            lines.forEach(line => {
+                if (line.trim()) {
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'log-entry';
+                    
+                    // Determine log level
+                    if (line.includes('ERROR') || line.includes('Error')) {
+                        logEntry.className += ' error';
+                    } else if (line.includes('✓') || line.includes('Success')) {
+                        logEntry.className += ' success';
+                    } else {
+                        logEntry.className += ' info';
+                    }
+                    
+                    logEntry.textContent = line;
+                    logsContainer.appendChild(logEntry);
+                }
+            });
+            
+            // Scroll to bottom
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
+        // Continue polling logs while job is active
+        if (statusCheckInterval) {
+            setTimeout(() => startLogStreaming(jobId), 3000);
+        }
+    } catch (error) {
+        console.error('Error fetching logs:', error);
+    }
+}
+
+async function showResults(jobId, status) {
+    processingSection.style.display = 'none';
+    resultsSection.style.display = 'block';
+    errorSection.style.display = 'none';
+
+    // Fetch download links
+    try {
+        const response = await fetch(`${API_BASE}/download/${jobId}`);
+        const downloadData = await response.json();
+
+        if (downloadData.files) {
+            downloadLinks.innerHTML = '';
+            downloadData.files.forEach(file => {
+                const link = document.createElement('a');
+                link.href = file.url;
+                link.className = 'download-link';
+                link.textContent = `📥 ${file.name}`;
+                link.download = file.name;
+                downloadLinks.appendChild(link);
+            });
+        }
+
+        // Show Google service links from status
+        if (status.outputs && status.outputs.links) {
+            driveLinks.innerHTML = '';
+            const linksData = status.outputs.links;
+            
+            // Create a container for Google Sheets links to display side by side
+            const sheetsContainer = document.createElement('div');
+            sheetsContainer.style.display = 'flex';
+            sheetsContainer.style.gap = '15px';
+            sheetsContainer.style.flexWrap = 'wrap';
+            sheetsContainer.style.marginBottom = '15px';
+            
+            if (linksData.google_sheets) {
+                const link = document.createElement('a');
+                link.href = linksData.google_sheets;
+                link.target = '_blank';
+                link.className = 'drive-link';
+                link.textContent = '📊 Facility Summary';
+                sheetsContainer.appendChild(link);
+            }
+            
+            if (linksData.test_fac_sheets) {
+                const link = document.createElement('a');
+                link.href = linksData.test_fac_sheets;
+                link.target = '_blank';
+                link.className = 'drive-link';
+                link.textContent = '📊 Facility Dashboard';
+                sheetsContainer.appendChild(link);
+            }
+            
+            if (sheetsContainer.children.length > 0) {
+                driveLinks.appendChild(sheetsContainer);
+            }
+            
+            // Create a container for PDF links to display side by side
+            const pdfContainer = document.createElement('div');
+            pdfContainer.style.display = 'flex';
+            pdfContainer.style.gap = '15px';
+            pdfContainer.style.flexWrap = 'wrap';
+            pdfContainer.style.marginBottom = '15px';
+            
+            if (linksData.generated_pdf) {
+                // Check if it's a URL or just a message
+                if (linksData.generated_pdf.startsWith('http')) {
+                    const link = document.createElement('a');
+                    link.href = linksData.generated_pdf;
+                    link.target = '_blank';
+                    link.className = 'drive-link';
+                    link.textContent = '📄 Facility Summary PDF';
+                    pdfContainer.appendChild(link);
+                } else {
+                    // If it's just a message, show it as text with a note
+                    const text = document.createElement('span');
+                    text.className = 'drive-link';
+                    text.textContent = `📄 Facility Summary PDF: ${linksData.generated_pdf}`;
+                    pdfContainer.appendChild(text);
+                }
+            }
+            
+            if (linksData.test_fac_pdf) {
+                // Check if it's a URL or just a message
+                if (linksData.test_fac_pdf.startsWith('http')) {
+                    const link = document.createElement('a');
+                    link.href = linksData.test_fac_pdf;
+                    link.target = '_blank';
+                    link.className = 'drive-link';
+                    link.textContent = '📄 Facility Dashboard PDF';
+                    pdfContainer.appendChild(link);
+                } else {
+                    // If it's just a message, show it as text with a note
+                    const text = document.createElement('span');
+                    text.className = 'drive-link';
+                    text.textContent = `📄 Facility Dashboard PDF: ${linksData.test_fac_pdf}`;
+                    pdfContainer.appendChild(text);
+                }
+            }
+            
+            if (pdfContainer.children.length > 0) {
+                driveLinks.appendChild(pdfContainer);
+            }
+            
+            if (linksData.google_slides) {
+                const link = document.createElement('a');
+                link.href = linksData.google_slides;
+                link.target = '_blank';
+                link.className = 'drive-link';
+                link.textContent = '📑 Google Slides';
+                driveLinks.appendChild(link);
+            }
+        }
+
+    } catch (error) {
+        console.error('Error fetching download links:', error);
+    }
+}
+
+function showError(message) {
+    processingSection.style.display = 'none';
+    resultsSection.style.display = 'none';
+    errorSection.style.display = 'block';
+    errorMessage.textContent = message;
+}
+
+function resetUI() {
+    adtFiles = [];
+    losFiles = [];
+    visitFiles = [];
+    
+    adtInput.value = '';
+    losInput.value = '';
+    visitInput.value = '';
+    
+    adtFileList.innerHTML = '';
+    losFileList.innerHTML = '';
+    visitFileList.innerHTML = '';
+    
+    processingSection.style.display = 'none';
+    resultsSection.style.display = 'none';
+    errorSection.style.display = 'none';
+    
+    currentJobId = null;
+    if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+        statusCheckInterval = null;
+    }
+    
+    checkUploadButton();
+}
+

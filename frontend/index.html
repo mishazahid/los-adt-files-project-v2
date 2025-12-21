@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facility Report Generator</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏥 Facility Report Generator</h1>
+            <p class="subtitle">Upload your PDF files to generate comprehensive facility reports</p>
+        </header>
+
+        <div class="upload-section">
+            <div class="upload-box" id="uploadBox">
+                <div class="upload-category">
+                    <h3>📄 ADT Files</h3>
+                    <p class="category-desc">Admission/Discharge/Transfer PDFs</p>
+                    <input type="file" id="adtFiles" multiple accept=".pdf" class="file-input">
+                    <label for="adtFiles" class="file-label">
+                        <span class="file-icon">📁</span>
+                        <span class="file-text">Choose ADT PDF files</span>
+                    </label>
+                    <div id="adtFileList" class="file-list"></div>
+                </div>
+
+                <div class="upload-category">
+                    <h3>📊 LOS Files</h3>
+                    <p class="category-desc">Length of Stay PDFs</p>
+                    <input type="file" id="losFiles" multiple accept=".pdf" class="file-input">
+                    <label for="losFiles" class="file-label">
+                        <span class="file-icon">📁</span>
+                        <span class="file-text">Choose LOS PDF files</span>
+                    </label>
+                    <div id="losFileList" class="file-list"></div>
+                </div>
+
+                <div class="upload-category">
+                    <h3>👥 VISIT Files</h3>
+                    <p class="category-desc">Visit data (Excel/CSV)</p>
+                    <input type="file" id="visitFiles" multiple accept=".xlsx,.xls,.csv" class="file-input">
+                    <label for="visitFiles" class="file-label">
+                        <span class="file-icon">📁</span>
+                        <span class="file-text">Choose Visit files</span>
+                    </label>
+                    <div id="visitFileList" class="file-list"></div>
+                </div>
+            </div>
+
+            <div id="facilityInputsSection" class="facility-inputs-section" style="display: none;">
+                <h3>📅 Enter Quarter Value</h3>
+                <p class="category-desc">Enter the quarter value that applies to all facilities.</p>
+                
+                <div id="quarterInputContainer" class="quarter-input-container">
+                    <div class="quarter-input-group">
+                        <label class="quarter-label">Quarter</label>
+                        <input type="text" id="quarterInput" class="quarter-value-input" placeholder="e.g., Q3 2025" maxlength="20">
+                    </div>
+                </div>
+                
+                <div id="googleSheetInputContainer" class="google-sheet-input-container" style="margin-top: 20px;">
+                    <h3>📊 Google Sheet for GS, PPS, INC Values</h3>
+                    <p class="category-desc">Upload the Google Sheet file that contains facility data with multiple tabs.</p>
+                    
+                    <div class="file-upload-wrapper">
+                        <input type="file" id="googleSheetFile" accept=".xlsx,.xls,.csv" class="file-input-hidden">
+                        <label for="googleSheetFile" class="file-upload-button">
+                            <span class="file-upload-icon">📁</span>
+                            <span class="file-upload-text">Choose Google Sheet File</span>
+                            <span class="file-upload-browse">Browse</span>
+                        </label>
+                        <div id="googleSheetFileName" class="file-name-display" style="display: none;">
+                            <span class="file-name-icon">✓</span>
+                            <span class="file-name-text"></span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="facilityInputsContainer" class="facility-inputs-container">
+                    <!-- Dynamic facility inputs will be added here -->
+                </div>
+            </div>
+
+            <button id="uploadBtn" class="upload-btn" disabled>
+                <span class="btn-text">Upload & Process Files</span>
+                <span class="btn-spinner" style="display: none;">⏳</span>
+            </button>
+        </div>
+
+        <div id="processingSection" class="processing-section" style="display: none;">
+            <div class="status-card">
+                <h2>Processing Status</h2>
+                <div class="status-info">
+                    <div class="status-item">
+                        <span class="status-label">Job ID:</span>
+                        <span id="jobId" class="status-value">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Status:</span>
+                        <span id="jobStatus" class="status-value">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Progress:</span>
+                        <div class="progress-bar">
+                            <div id="progressBar" class="progress-fill"></div>
+                        </div>
+                        <span id="progressText" class="progress-text">0%</span>
+                    </div>
+                </div>
+
+                <div class="logs-section">
+                    <h3>Processing Logs</h3>
+                    <div id="logsContainer" class="logs-container">
+                        <div class="log-entry">Waiting for logs...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="resultsSection" class="results-section" style="display: none;">
+            <div class="results-card">
+                <h2>✅ Processing Complete!</h2>
+                <p class="success-message">Your facility report has been generated successfully.</p>
+                
+                <div class="download-section">
+                    <h3>Download Files</h3>
+                    <div id="downloadLinks" class="download-links">
+                        <!-- Download links will be inserted here -->
+                    </div>
+                </div>
+
+                <div class="drive-links-section">
+                    <h3>Google Service Links</h3>
+                    <div id="driveLinks" class="drive-links">
+                        <!-- Google Sheets and Slides links will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="errorSection" class="error-section" style="display: none;">
+            <div class="error-card">
+                <h2>❌ Processing Error</h2>
+                <p id="errorMessage" class="error-message"></p>
+                <button id="retryBtn" class="retry-btn">Try Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
+
