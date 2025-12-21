@@ -38,6 +38,7 @@ let statusCheckInterval = null;
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     setupFileInputs();
+    setupGoogleSheetUpload();
     uploadBtn.addEventListener('click', handleUpload);
     
     const retryBtn = document.getElementById('retryBtn');
@@ -47,6 +48,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+function setupGoogleSheetUpload() {
+    const fileInput = document.getElementById('googleSheetFile');
+    const fileNameDisplay = document.getElementById('googleSheetFileName');
+    const fileNameText = fileNameDisplay.querySelector('.file-name-text');
+    
+    if (fileInput && fileNameDisplay) {
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                const fileName = e.target.files[0].name;
+                fileNameText.textContent = fileName;
+                fileNameDisplay.style.display = 'flex';
+                console.log('Google Sheet file selected:', fileName);
+            } else {
+                fileNameDisplay.style.display = 'none';
+            }
+        });
+    }
+}
 
 function setupFileInputs() {
     adtInput.addEventListener('change', (e) => {
@@ -200,50 +220,27 @@ function createFacilityInputs(facilities) {
     const container = document.getElementById('facilityInputsContainer');
     container.innerHTML = '';
     
-    facilities.forEach((facility, index) => {
-        const facilityDiv = document.createElement('div');
-        facilityDiv.className = 'facility-input-group';
-        facilityDiv.innerHTML = `
-            <label class="facility-label">${facility}</label>
-            <div class="facility-inputs-row">
-                <div class="input-group">
-                    <label class="input-label">Global Score Value</label>
-                    <input type="text" class="facility-value-input" data-facility="${facility}" data-field="gs" placeholder="Enter value">
-                </div>
-                <div class="input-group">
-                    <label class="input-label">End of PPS Mean</label>
-                    <input type="text" class="facility-value-input" data-facility="${facility}" data-field="pps" placeholder="Enter value">
-                </div>
-                <div class="input-group">
-                    <label class="input-label">Increase in Score</label>
-                    <input type="text" class="facility-value-input" data-facility="${facility}" data-field="inc" placeholder="Enter value">
-                </div>
-            </div>
-        `;
-        container.appendChild(facilityDiv);
-    });
+    // GS, PPS, INC are now auto-fetched from Google Sheet, so we don't show input boxes
+    // Only show Quarter input (which is already in the HTML)
+    // We can optionally show a message that GS/PPS/INC will be auto-calculated
+    
+    // Show a message that values will be auto-fetched
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'facility-input-info';
+    infoDiv.style.cssText = 'padding: 10px; margin-bottom: 15px; background-color: #e3f2fd; border-radius: 4px; color: #1976d2;';
+    infoDiv.innerHTML = `
+        <strong>Note:</strong> GS (Global Score), PPS (End of PPS Mean), and INC (Increase in Score) 
+        values will be automatically calculated from the Google Sheet you provide above.
+    `;
+    container.appendChild(infoDiv);
     
     document.getElementById('facilityInputsSection').style.display = 'block';
 }
 
 function getFacilityValues() {
     const values = {};
-    const inputs = document.querySelectorAll('.facility-value-input');
     
-    inputs.forEach(input => {
-        const facility = input.dataset.facility;
-        const field = input.dataset.field;
-        const value = input.value.trim();
-        
-        if (!values[facility]) {
-            values[facility] = {};
-        }
-        
-        if (value) {
-            values[facility][field.toUpperCase()] = value;
-        }
-    });
-    
+    // GS, PPS, INC are now auto-fetched, so we only need to get the quarter value
     // Get quarter value (single value for all facilities)
     const quarterInput = document.getElementById('quarterInput');
     if (quarterInput && quarterInput.value.trim()) {
@@ -274,10 +271,20 @@ async function handleUpload() {
         formData.append('visit_files', file);
     });
     
-    // Add facility values (GS, PPS, INC for each facility)
+    // Add facility values (quarter)
     const facilityValues = getFacilityValues();
     if (Object.keys(facilityValues).length > 0) {
         formData.append('facility_values', JSON.stringify(facilityValues));
+    }
+    
+    // Add Google Sheet file
+    const fileInput = document.getElementById('googleSheetFile');
+    
+    if (fileInput && fileInput.files.length > 0) {
+        console.log('Adding Google Sheet file to form:', fileInput.files[0].name);
+        formData.append('google_sheet_file', fileInput.files[0]);
+    } else {
+        console.log('No Google Sheet file provided');
     }
 
     // Show processing section
