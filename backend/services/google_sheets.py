@@ -25,6 +25,7 @@ class GoogleSheetsService:
         self._initialize_service()
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID", "1CWV6su2PZUrP372Vd19N6sZzXcEFxZb_NNZwT0af0Wo")
         self.sheet_tab = os.getenv("GOOGLE_SHEET_TAB", "Summary")
+        self.medilodge_q3_sheet_id = os.getenv("MEDILODGE_Q3_DATA_SHEET_ID", "1BlTxrYp5368Ggl5fRDI99O27AECH5auLM-mxJhr_tzw")
 
     @staticmethod
     def _to_number(value):
@@ -845,3 +846,379 @@ class GoogleSheetsService:
         except Exception as e:
             logger.error(f"Error appending data to Sheets: {e}")
             return False
+    
+    def _map_facility_to_tab_name(self, facility_name: str) -> Optional[str]:
+        """
+        Map facility name from ADT files to Google Sheet tab name.
+        
+        Args:
+            facility_name: Facility name from ADT file (e.g., "Medilodge of Farmington")
+        
+        Returns:
+            Tab name in Medilodge Q3 Data sheet, or None if not found
+        """
+        # Normalize facility name for matching
+        facility_lower = facility_name.lower().strip()
+        
+        # Mapping of facility names to tab names
+        # Tab names: Clare, Mt Pleasant, Holland, at the Shore, Ludington, Grand Rapids, 
+        # Wyoming, Sault Ste. Marie, Autumn Woods, Farmington, Grand Blanc, Howell, 
+        # Monroe, Livingston, Montrose, Shoreline, Sterling Heights
+        facility_mapping = {
+            'clare': 'Clare',
+            'mt pleasant': 'Mt Pleasant',
+            'mt. pleasant': 'Mt Pleasant',
+            'holland': 'Holland',
+            'at the shore': 'at the Shore',
+            'ludington': 'Ludington',
+            'grand rapids': 'Grand Rapids',
+            'wyoming': 'Wyoming',
+            'sault ste. marie': 'Sault Ste. Marie',
+            'sault st. marie': 'Sault Ste. Marie',
+            'autumn woods': 'Autumn Woods',
+            'autumn woods residential': 'Autumn Woods',
+            'farmington': 'Farmington',
+            'grand blanc': 'Grand Blanc',
+            'howell': 'Howell',
+            'monroe': 'Monroe',
+            'livingston': 'Livingston',
+            'montrose': 'Montrose',
+            'shoreline': 'Shoreline',
+            'sterling heights': 'Sterling Heights',
+            'sterling': 'Sterling Heights',
+        }
+        
+        # Try exact match first
+        for key, tab_name in facility_mapping.items():
+            if key in facility_lower:
+                return tab_name
+        
+        # Try partial matches
+        if 'medilodge of' in facility_lower:
+            # Extract the location part
+            location = facility_lower.replace('medilodge of', '').strip()
+            for key, tab_name in facility_mapping.items():
+                if location in key or key in location:
+                    return tab_name
+        
+        logger.warning(f"Could not map facility '{facility_name}' to a tab name")
+        return None
+    
+    def fetch_facility_metrics(self, facility_names: list, sheet_id: Optional[str] = None) -> dict:
+        """
+        Fetch GS, PPS, and INC values from Google Sheet for given facilities.
+        
+        Args:
+            facility_names: List of facility names (e.g., ["Medilodge of Farmington", "Medilodge of Clare"])
+            sheet_id: Optional Google Sheet ID. If not provided, uses default from env var.
+        
+        Returns:
+            Dictionary mapping facility names to their metrics:
+            {
+                "Medilodge of Farmington": {"GS": 15.5, "PPS": 18.2, "INC": 2.7},
+                "Medilodge of Clare": {"GS": 12.3, "PPS": 14.8, "INC": 2.5},
+                ...
+            }
+        """
+        if not self.sheets_service:
+            logger.error("Google Sheets service not initialized")
+            return {}
+        
+        # Use provided sheet_id or fall back to default
+        target_sheet_id = sheet_id if sheet_id else self.medilodge_q3_sheet_id
+        
+        # Verify sheet is accessible
+        try:
+            sheet_metadata = self.sheets_service.get(spreadsheetId=target_sheet_id).execute()
+            sheet_title = sheet_metadata.get('properties', {}).get('title', 'Unknown')
+            logger.info(f"Accessing Google Sheet: '{sheet_title}' (ID: {target_sheet_id})")
+            
+            # List available tabs
+            tabs = [sheet.get('properties', {}).get('title', '') for sheet in sheet_metadata.get('sheets', [])]
+            logger.info(f"Available tabs in sheet: {tabs}")
+        except Exception as e:
+            logger.error(f"Error accessing Google Sheet (ID: {target_sheet_id}): {e}")
+            return {}
+        
+        results = {}
+        
+        for facility_name in facility_names:
+            tab_name_mapped = self._map_facility_to_tab_name(facility_name)
+            if not tab_name_mapped:
+                logger.warning(f"Skipping facility '{facility_name}' - no matching tab found in mapping")
+                continue
+            
+            # Find the exact tab name (case-insensitive) from available tabs
+            tab_name = None
+            for available_tab in tabs:
+                if available_tab.lower() == tab_name_mapped.lower():
+                    tab_name = available_tab  # Use the exact case from the sheet
+                    logger.info(f"Mapped facility '{facility_name}' to tab '{tab_name}'")
+                    break
+            
+            if not tab_name:
+                logger.warning(f"Tab '{tab_name_mapped}' not found in sheet for facility '{facility_name}'. Available tabs: {tabs}")
+                continue
+            
+            try:
+                # Read columns L-Y and AA-AN separately to ensure proper alignment
+                # Columns L-Y (columns 12-25, 0-indexed: 11-24) 
+                # Columns AA-AN (columns 27-40, 0-indexed: 26-39)
+                # Rows 4-250 (1-indexed, so 0-indexed: 3-249)
+                range_l_y = f"{tab_name}!L4:Y250"
+                range_aa_an = f"{tab_name}!AA4:AN250"
+                
+                logger.info(f"Reading data from tab '{tab_name}' for facility '{facility_name}'")
+                
+                result_l_y = self.sheets_service.values().get(
+                    spreadsheetId=target_sheet_id,
+                    range=range_l_y
+                ).execute()
+                
+                result_aa_an = self.sheets_service.values().get(
+                    spreadsheetId=target_sheet_id,
+                    range=range_aa_an
+                ).execute()
+                
+                values_l_y = result_l_y.get('values', [])
+                values_aa_an = result_aa_an.get('values', [])
+                
+                logger.info(f"Read {len(values_l_y)} rows from L-Y and {len(values_aa_an)} rows from AA-AN for '{facility_name}'")
+                
+                if not values_l_y or not values_aa_an:
+                    logger.warning(f"No data found in tab '{tab_name}' for facility '{facility_name}' (L-Y: {len(values_l_y)} rows, AA-AN: {len(values_aa_an)} rows)")
+                    continue
+                
+                # Column Y is the 14th column in L-Y range (index 13)
+                # Column AN is the 14th column in AA-AN range (index 13)
+                col_y_index = 13  # Y is the 14th column (L=0, M=1, ..., Y=13)
+                col_an_index = 13  # AN is the 14th column (AA=0, AB=1, ..., AN=13)
+                
+                complete_rows_y = []
+                complete_rows_an = []
+                
+                # Find rows where all columns L-Y and AA-AN are populated
+                max_rows = min(len(values_l_y), len(values_aa_an))
+                
+                for row_idx in range(max_rows):
+                    row_l_y = values_l_y[row_idx] if row_idx < len(values_l_y) else []
+                    row_aa_an = values_aa_an[row_idx] if row_idx < len(values_aa_an) else []
+                    
+                    # Check if all columns L-Y are populated (14 columns: L through Y)
+                    l_y_complete = len(row_l_y) >= 14 and all(
+                        cell and str(cell).strip() != '' 
+                        for cell in row_l_y[:14]
+                    )
+                    
+                    # Check if all columns AA-AN are populated (14 columns: AA through AN)
+                    aa_an_complete = len(row_aa_an) >= 14 and all(
+                        cell and str(cell).strip() != '' 
+                        for cell in row_aa_an[:14]
+                    )
+                    
+                    # Row is complete only if BOTH sections are fully populated
+                    if l_y_complete and aa_an_complete:
+                        # Get column Y value (index 13 in L-Y range)
+                        if len(row_l_y) > col_y_index:
+                            y_value = row_l_y[col_y_index]
+                            try:
+                                y_num = float(y_value)
+                                complete_rows_y.append(y_num)
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        # Get column AN value (index 13 in AA-AN range)
+                        if len(row_aa_an) > col_an_index:
+                            an_value = row_aa_an[col_an_index]
+                            try:
+                                an_num = float(an_value)
+                                complete_rows_an.append(an_num)
+                            except (ValueError, TypeError):
+                                pass
+                
+                # Calculate averages
+                if complete_rows_y and complete_rows_an and len(complete_rows_y) == len(complete_rows_an):
+                    gs = sum(complete_rows_y) / len(complete_rows_y)
+                    pps = sum(complete_rows_an) / len(complete_rows_an)
+                    inc = pps - gs
+                    
+                    results[facility_name] = {
+                        "GS": round(gs, 2),
+                        "PPS": round(pps, 2),
+                        "INC": round(inc, 2)
+                    }
+                    
+                    logger.info(f"Calculated metrics for '{facility_name}' (tab: {tab_name}): "
+                              f"GS={gs:.2f}, PPS={pps:.2f}, INC={inc:.2f} "
+                              f"(from {len(complete_rows_y)} complete rows)")
+                else:
+                    logger.warning(f"Insufficient complete rows for '{facility_name}' (tab: {tab_name}): "
+                                 f"Y values: {len(complete_rows_y)}, AN values: {len(complete_rows_an)}")
+                    # Log more details for debugging
+                    logger.info(f"Total rows checked: {max_rows}, L-Y rows: {len(values_l_y)}, AA-AN rows: {len(values_aa_an)}")
+                    
+            except HttpError as e:
+                error_details = str(e)
+                logger.error(f"HTTP Error fetching data from tab '{tab_name}' for facility '{facility_name}': {error_details}")
+                # Check if it's a permission or not found error
+                if '404' in error_details or 'not found' in error_details.lower():
+                    logger.error(f"Tab '{tab_name}' may not exist in the sheet")
+                elif '403' in error_details or 'permission' in error_details.lower():
+                    logger.error(f"Permission denied accessing tab '{tab_name}' - check sheet permissions")
+            except Exception as e:
+                import traceback
+                error_traceback = traceback.format_exc()
+                logger.error(f"Unexpected error processing facility '{facility_name}': {e}")
+                logger.error(f"Traceback: {error_traceback}")
+        
+        return results
+    
+    def fetch_facility_metrics_from_file(self, facility_names: list, file_path: str) -> dict:
+        """
+        Fetch GS, PPS, and INC values from an uploaded Excel/CSV file for given facilities.
+        The file should have multiple sheets/tabs, one for each facility.
+        
+        Args:
+            facility_names: List of facility names (e.g., ["Medilodge of Farmington", "Medilodge of Clare"])
+            file_path: Path to the uploaded Excel/CSV file
+        
+        Returns:
+            Dictionary mapping facility names to their metrics:
+            {
+                "Medilodge of Farmington": {"GS": 15.5, "PPS": 18.2, "INC": 2.7},
+                "Medilodge of Clare": {"GS": 12.3, "PPS": 14.8, "INC": 2.5},
+                ...
+            }
+        """
+        results = {}
+        file_path_obj = Path(file_path)
+        
+        if not file_path_obj.exists():
+            logger.error(f"File not found: {file_path}")
+            return {}
+        
+        try:
+            # Read the file - try Excel first, then CSV
+            if file_path_obj.suffix.lower() in ['.xlsx', '.xls']:
+                # Read all sheets from Excel file
+                excel_file = pd.ExcelFile(file_path_obj)
+                sheet_names = excel_file.sheet_names
+                logger.info(f"Reading Excel file with {len(sheet_names)} sheets: {sheet_names}")
+            else:
+                # For CSV, we'll treat it as a single sheet
+                sheet_names = ['Sheet1']  # Default name for CSV
+                logger.info(f"Reading CSV file: {file_path}")
+            
+            for facility_name in facility_names:
+                tab_name_mapped = self._map_facility_to_tab_name(facility_name)
+                if not tab_name_mapped:
+                    logger.warning(f"Skipping facility '{facility_name}' - no matching tab found in mapping")
+                    continue
+                
+                # Find the exact tab name (case-insensitive) from available sheets
+                tab_name = None
+                for available_tab in sheet_names:
+                    if available_tab.lower() == tab_name_mapped.lower():
+                        tab_name = available_tab  # Use the exact case from the file
+                        logger.info(f"Mapped facility '{facility_name}' to sheet '{tab_name}'")
+                        break
+                
+                if not tab_name:
+                    logger.warning(f"Sheet '{tab_name_mapped}' not found in file for facility '{facility_name}'. Available sheets: {sheet_names}")
+                    continue
+                
+                try:
+                    # Read the specific sheet
+                    if file_path_obj.suffix.lower() in ['.xlsx', '.xls']:
+                        df = pd.read_excel(file_path_obj, sheet_name=tab_name, header=None)
+                    else:
+                        df = pd.read_csv(file_path_obj, header=None)
+                    
+                    # Columns L-Y are indices 11-24 (0-indexed), AA-AN are indices 26-39
+                    # Rows 4-250 (0-indexed: 3-249)
+                    # Read columns L-Y (11-24) and AA-AN (26-39) from rows 3-249
+                    if len(df) < 4:
+                        logger.warning(f"Sheet '{tab_name}' has insufficient rows (need at least 4, got {len(df)})")
+                        continue
+                    
+                    # Get data from rows 3-249 (0-indexed), columns 11-24 (L-Y) and 26-39 (AA-AN)
+                    max_row = min(250, len(df))
+                    l_y_data = df.iloc[3:max_row, 11:25].values  # Columns L-Y (11-24, exclusive end is 25)
+                    aa_an_data = df.iloc[3:max_row, 26:40].values  # Columns AA-AN (26-39, exclusive end is 40)
+                    
+                    # Column Y is index 13 in L-Y range, Column AN is index 13 in AA-AN range
+                    col_y_index = 13
+                    col_an_index = 13
+                    
+                    complete_rows_y = []
+                    complete_rows_an = []
+                    
+                    # Find rows where all columns L-Y and AA-AN are populated
+                    for row_idx in range(len(l_y_data)):
+                        row_l_y = l_y_data[row_idx]
+                        row_aa_an = aa_an_data[row_idx] if row_idx < len(aa_an_data) else []
+                        
+                        # Check if all columns L-Y are populated (14 columns)
+                        l_y_complete = len(row_l_y) >= 14 and all(
+                            pd.notna(cell) and str(cell).strip() != '' 
+                            for cell in row_l_y[:14]
+                        )
+                        
+                        # Check if all columns AA-AN are populated (14 columns)
+                        aa_an_complete = len(row_aa_an) >= 14 and all(
+                            pd.notna(cell) and str(cell).strip() != '' 
+                            for cell in row_aa_an[:14]
+                        )
+                        
+                        # Row is complete only if BOTH sections are fully populated
+                        if l_y_complete and aa_an_complete:
+                            # Get column Y value (index 13 in L-Y range)
+                            if len(row_l_y) > col_y_index:
+                                y_value = row_l_y[col_y_index]
+                                try:
+                                    y_num = float(y_value)
+                                    complete_rows_y.append(y_num)
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            # Get column AN value (index 13 in AA-AN range)
+                            if len(row_aa_an) > col_an_index:
+                                an_value = row_aa_an[col_an_index]
+                                try:
+                                    an_num = float(an_value)
+                                    complete_rows_an.append(an_num)
+                                except (ValueError, TypeError):
+                                    pass
+                    
+                    # Calculate averages
+                    if complete_rows_y and complete_rows_an and len(complete_rows_y) == len(complete_rows_an):
+                        gs = sum(complete_rows_y) / len(complete_rows_y)
+                        pps = sum(complete_rows_an) / len(complete_rows_an)
+                        inc = pps - gs
+                        
+                        results[facility_name] = {
+                            "GS": round(gs, 2),
+                            "PPS": round(pps, 2),
+                            "INC": round(inc, 2)
+                        }
+                        
+                        logger.info(f"Calculated metrics for '{facility_name}' (sheet: {tab_name}): "
+                                  f"GS={gs:.2f}, PPS={pps:.2f}, INC={inc:.2f} "
+                                  f"(from {len(complete_rows_y)} complete rows)")
+                    else:
+                        logger.warning(f"Insufficient complete rows for '{facility_name}' (sheet: {tab_name}): "
+                                     f"Y values: {len(complete_rows_y)}, AN values: {len(complete_rows_an)}")
+                        
+                except Exception as e:
+                    import traceback
+                    error_traceback = traceback.format_exc()
+                    logger.error(f"Error reading sheet '{tab_name}' for facility '{facility_name}': {e}")
+                    logger.error(f"Traceback: {error_traceback}")
+                    
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"Error reading file '{file_path}': {e}")
+            logger.error(f"Traceback: {error_traceback}")
+        
+        return results
