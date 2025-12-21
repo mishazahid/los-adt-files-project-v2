@@ -21,7 +21,9 @@ async def upload_files(
     adt_files: Optional[List[UploadFile]] = File(None),
     los_files: Optional[List[UploadFile]] = File(None),
     visit_files: Optional[List[UploadFile]] = File(None),
-    facility_values: Optional[str] = Form(None)
+    facility_values: Optional[str] = Form(None),
+    google_sheet_link: Optional[str] = Form(None),
+    google_sheet_file: Optional[UploadFile] = File(None)
 ):
     """
     Upload files for processing
@@ -110,6 +112,49 @@ async def upload_files(
         # Store facility values in job status
         if facility_values_dict:
             job_status[job_id]["facility_values"] = facility_values_dict
+        
+        # Handle Google Sheet link or file
+        google_sheet_id = None
+        logger.info(f"Received google_sheet_link: {google_sheet_link}")
+        logger.info(f"Received google_sheet_file: {google_sheet_file}")
+        if google_sheet_file:
+            logger.info(f"google_sheet_file filename: {google_sheet_file.filename}")
+        
+        # Check link first (has priority)
+        if google_sheet_link and str(google_sheet_link).strip():
+            # Extract sheet ID from Google Sheets URL
+            import re
+            link_str = str(google_sheet_link).strip()
+            # Pattern: https://docs.google.com/spreadsheets/d/{SHEET_ID}/...
+            match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', link_str)
+            if match:
+                google_sheet_id = match.group(1)
+                logger.info(f"Extracted Google Sheet ID from link: {google_sheet_id}")
+            else:
+                # If no URL pattern, assume it's already a sheet ID
+                google_sheet_id = link_str
+                logger.info(f"Using provided Google Sheet ID: {google_sheet_id}")
+        # Check file if no link provided
+        elif google_sheet_file and hasattr(google_sheet_file, 'filename') and google_sheet_file.filename and google_sheet_file.filename.strip():
+            # If file is uploaded, save it with original extension
+            file_extension = Path(google_sheet_file.filename).suffix if google_sheet_file.filename else '.xlsx'
+            sheet_file_path = job_dir / f"google_sheet_file{file_extension}"
+            try:
+                with open(sheet_file_path, "wb") as buffer:
+                    shutil.copyfileobj(google_sheet_file.file, buffer)
+                job_status[job_id]["google_sheet_file"] = str(sheet_file_path)
+                logger.info(f"Google Sheet file uploaded: {google_sheet_file.filename} -> {sheet_file_path}")
+            except Exception as e:
+                logger.error(f"Error saving Google Sheet file: {e}")
+        
+        # Store Google Sheet ID or file in job status
+        if google_sheet_id:
+            job_status[job_id]["google_sheet_id"] = google_sheet_id
+            logger.info(f"✅ Stored Google Sheet ID in job status: {google_sheet_id}")
+        elif job_status[job_id].get("google_sheet_file"):
+            logger.info(f"✅ Stored Google Sheet file path in job status: {job_status[job_id].get('google_sheet_file')}")
+        else:
+            logger.warning("⚠️ No Google Sheet link or file provided - will use default from env var")
         
         # Update job status
         job_status[job_id]["status"] = "uploaded"
