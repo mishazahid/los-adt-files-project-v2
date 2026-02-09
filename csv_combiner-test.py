@@ -740,12 +740,10 @@ def format_facility_name_for_display(facility_name: str) -> str:
     # Convert back from normalized format to readable format
     display_name = facility_name.replace('_', ' ')
     
-    # Handle specific facility name patterns
-    if display_name == 'at_the shore':
+    # Handle specific facility name patterns (after underscore replacement)
+    if display_name == 'at the shore':
         return 'Medilodge at the Shore'
-    elif display_name == 'at_the_shore':
-        return 'Medilodge at the Shore'
-    elif display_name == 'sterling_heights':
+    elif display_name == 'sterling heights':
         return 'Medilodge of Sterling Heights'
     elif display_name == 'farmington':
         return 'Medilodge of Farmington'
@@ -767,6 +765,14 @@ def format_facility_name_for_display(facility_name: str) -> str:
         return 'Medilodge of Grand Blanc'
     elif display_name == 'monroe':
         return 'Medilodge of Monroe'
+    elif display_name == 'howell':
+        return 'Medilodge of Howell'
+    elif display_name == 'montrose':
+        return 'Medilodge of Montrose'
+    elif display_name == 'shoreline':
+        return 'Medilodge of Shoreline'
+    elif display_name == 'livingston':
+        return 'Medilodge of Livingston'
     else:
         # Default formatting for other facilities
         # Handle special cases for abbreviations

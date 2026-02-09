@@ -135,6 +135,10 @@ def extract_facility_name_from_combined_file(filename: str) -> str:
     if name.startswith('combined_'):
         name = name[9:]  # Remove "combined_"
     
+    # Remove "of_" prefix if present (handles cases like "combined_of_mt._pleasant")
+    if name.startswith('of_'):
+        name = name[3:]  # Remove "of_"
+    
     # Convert underscores to spaces and title case
     display_name = name.replace('_', ' ').title()
     
@@ -151,7 +155,7 @@ def extract_facility_name_from_combined_file(filename: str) -> str:
         return 'Medilodge of Clare'
     elif 'Ludington' in display_name:
         return 'Medilodge of Ludington'
-    elif 'Mt Pleasant' in display_name:
+    elif 'Mt. Pleasant' in display_name or 'Mt Pleasant' in display_name:
         return 'Medilodge of Mt. Pleasant'
     elif 'Holland' in display_name:
         return 'Medilodge of Holland'
@@ -163,6 +167,12 @@ def extract_facility_name_from_combined_file(filename: str) -> str:
         return 'Medilodge of Grand Blanc'
     elif 'Monroe' in display_name:
         return 'Medilodge of Monroe'
+    elif 'Howell' in display_name:
+        return 'Medilodge of Howell'
+    elif 'Montrose' in display_name:
+        return 'Medilodge of Montrose'
+    elif 'Shoreline' in display_name:
+        return 'Medilodge of Shoreline'
     elif 'Autumn Woods' in display_name or 'Autumn' in display_name:
         # Non-Medilodge facility - return as-is without prefix
         formatted_name = display_name.title()

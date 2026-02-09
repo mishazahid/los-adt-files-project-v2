@@ -694,12 +694,14 @@ class GoogleSheetsService:
                     logger.warning(f"Source column '{source_col}' not found in Raw_Data headers")
                     return False
             
-            # Clear A1:F9 in Facility_Data tab (user requested full A-F rows 1-9)
-            logger.info(f"Clearing data range A1:F9 in {facility_data_tab} tab (preserving graphs outside this range)")
+            # Clear A2:F100 in Facility_Data tab (preserve header row 1, clear all old data)
+            # This ensures ALL previous data is removed before writing new data
+            logger.info(f"Clearing data range A2:F100 in {facility_data_tab} tab (preserving header and graphs)")
             self.sheets_service.values().clear(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!A1:F9"
+                range=f"{facility_data_tab}!A2:F100"
             ).execute()
+            logger.info(f"Successfully cleared old data from {facility_data_tab} tab")
             
             # Write headers in row 1 if needed (or update them)
             headers = ["Facilities", "Managed Care Average LOS", "Medicare A Average LOS", 
@@ -859,6 +861,15 @@ class GoogleSheetsService:
         """
         # Normalize facility name for matching
         facility_lower = facility_name.lower().strip()
+        logger.info(f"Mapping facility: '{facility_name}' (lowercase: '{facility_lower}')")
+        
+        # Remove "medilodge of" or "of" prefix for better matching
+        if facility_lower.startswith('medilodge of '):
+            facility_lower = facility_lower.replace('medilodge of ', '', 1).strip()
+            logger.info(f"  Removed 'medilodge of' prefix -> '{facility_lower}'")
+        elif facility_lower.startswith('of '):
+            facility_lower = facility_lower.replace('of ', '', 1).strip()
+            logger.info(f"  Removed 'of' prefix -> '{facility_lower}'")
         
         # Mapping of facility names to tab names
         # Tab names: Clare, Mt Pleasant, Holland, at the Shore, Ludington, Grand Rapids, 
@@ -866,8 +877,8 @@ class GoogleSheetsService:
         # Monroe, Livingston, Montrose, Shoreline, Sterling Heights
         facility_mapping = {
             'clare': 'Clare',
-            'mt pleasant': 'Mt Pleasant',
-            'mt. pleasant': 'Mt Pleasant',
+            'mt pleasant': 'Mt. Pleasant',
+            'mt. pleasant': 'Mt. Pleasant',
             'holland': 'Holland',
             'at the shore': 'at the Shore',
             'ludington': 'Ludington',
@@ -890,18 +901,17 @@ class GoogleSheetsService:
         
         # Try exact match first
         for key, tab_name in facility_mapping.items():
-            if key in facility_lower:
+            if key == facility_lower or key in facility_lower:
+                logger.info(f"  Matched '{facility_lower}' to tab '{tab_name}' via key '{key}'")
                 return tab_name
         
-        # Try partial matches
-        if 'medilodge of' in facility_lower:
-            # Extract the location part
-            location = facility_lower.replace('medilodge of', '').strip()
-            for key, tab_name in facility_mapping.items():
-                if location in key or key in location:
-                    return tab_name
+        # Try partial matches (check if any key is a substring of facility_lower)
+        for key, tab_name in facility_mapping.items():
+            if key in facility_lower or facility_lower in key:
+                logger.info(f"  Matched '{facility_lower}' to tab '{tab_name}' via partial key '{key}'")
+                return tab_name
         
-        logger.warning(f"Could not map facility '{facility_name}' to a tab name")
+        logger.warning(f"Could not map facility '{facility_name}' (normalized: '{facility_lower}') to a tab name. Available keys: {list(facility_mapping.keys())}")
         return None
     
     def fetch_facility_metrics(self, facility_names: list, sheet_id: Optional[str] = None) -> dict:
@@ -1116,8 +1126,10 @@ class GoogleSheetsService:
                     continue
                 
                 # Find the exact tab name (case-insensitive) from available sheets
+                logger.info(f"Looking for tab '{tab_name_mapped}' (case-insensitive) in available sheets: {sheet_names}")
                 tab_name = None
                 for available_tab in sheet_names:
+                    logger.debug(f"  Comparing: '{available_tab.lower()}' == '{tab_name_mapped.lower()}' -> {available_tab.lower() == tab_name_mapped.lower()}")
                     if available_tab.lower() == tab_name_mapped.lower():
                         tab_name = available_tab  # Use the exact case from the file
                         logger.info(f"Mapped facility '{facility_name}' to sheet '{tab_name}'")
