@@ -76,12 +76,30 @@ class GoogleSheetsService:
             return value
 
     @staticmethod
-    def _normalize_numeric_columns(values, start_col: int = 1, end_col: int = 28):
+    def _normalize_numeric_columns(values, start_col: int = 1, end_col: int = 28, skip_columns: list = None):
         """
         Convert columns (1-indexed in Sheets terms; 0-indexed in Python lists)
         within the provided range to numeric using _to_number, skipping the header row.
         Default range: columns B (index 1) through AC (index 28).
+        
+        Args:
+            values: List of rows (each row is a list of values)
+            start_col: Starting column index (0-based)
+            end_col: Ending column index (0-based)
+            skip_columns: List of column names to skip conversion (e.g., ['HD', 'HDN', 'HT'])
         """
+        # Get column indices to skip based on header row
+        skip_indices = []
+        if skip_columns and len(values) > 0:
+            header_row = values[0]
+            for col_name in skip_columns:
+                try:
+                    col_idx = header_row.index(col_name)
+                    skip_indices.append(col_idx)
+                    logger.info(f"Skipping conversion for ratio column '{col_name}' at index {col_idx}")
+                except ValueError:
+                    pass  # Column not found in header
+        
         for r_idx, row in enumerate(values):
             if r_idx == 0:
                 continue  # header
@@ -92,7 +110,9 @@ class GoogleSheetsService:
                 if c_idx < len(row):
                     # Skip if already empty string or None
                     if row[c_idx] != '' and row[c_idx] is not None:
-                        row[c_idx] = GoogleSheetsService._to_number(row[c_idx])
+                        # Skip conversion for ratio columns
+                        if c_idx not in skip_indices:
+                            row[c_idx] = GoogleSheetsService._to_number(row[c_idx])
         return values
 
     def _get_sheet_id(self, spreadsheet_id: str, tab_title: str) -> Optional[int]:
@@ -226,7 +246,10 @@ class GoogleSheetsService:
             facility_values = dict(facility_values) if facility_values else {}
             
             # Read CSV file
-            df = pd.read_csv(csv_file)
+            # Keep ratio columns as strings to prevent automatic time conversion
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
+            dtype_dict = {col: str for col in ratio_columns}
+            df = pd.read_csv(csv_file, dtype=dtype_dict)
             
             # Log what we're reading
             logger.info(f"Reading CSV file: {csv_file}")
@@ -247,8 +270,11 @@ class GoogleSheetsService:
 
             # Normalize values to numeric where possible to avoid time/text formatting
             # Use apply with map instead of deprecated applymap, and handle NaN values
+            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF) to preserve "count:total" format
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
             for col in df.columns:
-                df[col] = df[col].apply(lambda x: self._to_number(x) if pd.notna(x) else x)
+                if col not in ratio_columns:
+                    df[col] = df[col].apply(lambda x: self._to_number(x) if pd.notna(x) else x)
             
             # Extract quarter value (for Executive sheet only, not Summary sheet)
             quarter_value = None
@@ -332,7 +358,18 @@ class GoogleSheetsService:
                 logger.info(f"First data row sample: {values[1][:5]}...")  # Log first 5 columns of first data row
 
             # Normalize numeric columns B:AC to ensure numbers, not strings/times
-            values = self._normalize_numeric_columns(values, start_col=1, end_col=28)
+            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF) to preserve "count:total" format
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
+            values = self._normalize_numeric_columns(values, start_col=1, end_col=28, skip_columns=ratio_columns)
+            
+            # Prepend single quote to ratio columns to force Google Sheets to treat as text
+            header = values[0]
+            ratio_col_indices = [i for i, col in enumerate(header) if col in ratio_columns]
+            for row_idx in range(1, len(values)):  # Skip header row
+                for col_idx in ratio_col_indices:
+                    if col_idx < len(values[row_idx]) and values[row_idx][col_idx]:
+                        # Add single quote prefix to force text format in Google Sheets
+                        values[row_idx][col_idx] = f"'{values[row_idx][col_idx]}"
             
             # Clear existing data
             # 1) Hard-clear GS/PPS/INC columns to avoid stale data even if new payload is smaller
@@ -569,7 +606,19 @@ class GoogleSheetsService:
                 return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
             
             # Normalize numeric columns B:AC before writing to Test sheet
-            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=28)
+            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF) to preserve "count:total" format
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
+            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=28, skip_columns=ratio_columns)
+            
+            # Prepend single quote to ratio columns to force Google Sheets to treat as text
+            if len(source_values) > 0:
+                header = source_values[0]
+                ratio_col_indices = [i for i, col in enumerate(header) if col in ratio_columns]
+                for row_idx in range(1, len(source_values)):  # Skip header row
+                    for col_idx in ratio_col_indices:
+                        if col_idx < len(source_values[row_idx]) and source_values[row_idx][col_idx]:
+                            # Add single quote prefix to force text format in Google Sheets
+                            source_values[row_idx][col_idx] = f"'{source_values[row_idx][col_idx]}"
             
             logger.info(f"Found {len(source_values)} rows to copy to Test sheet")
             
