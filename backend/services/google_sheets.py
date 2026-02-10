@@ -1002,7 +1002,12 @@ class GoogleSheetsService:
         results = {}
         
         for facility_name in facility_names:
-            tab_name_mapped = self._map_facility_to_tab_name(facility_name)
+            # Explicit check for Grand Blanc
+            if 'blanc' in facility_name.lower():
+                tab_name_mapped = 'Grand Blanc'
+            else:
+                tab_name_mapped = self._map_facility_to_tab_name(facility_name)
+            
             if not tab_name_mapped:
                 logger.warning(f"Skipping facility '{facility_name}' - no matching tab found in mapping")
                 continue
@@ -1169,7 +1174,12 @@ class GoogleSheetsService:
                 logger.info(f"Reading CSV file: {file_path}")
             
             for facility_name in facility_names:
-                tab_name_mapped = self._map_facility_to_tab_name(facility_name)
+                # Explicit check for Grand Blanc
+                if 'blanc' in facility_name.lower():
+                    tab_name_mapped = 'Grand Blanc'
+                else:
+                    tab_name_mapped = self._map_facility_to_tab_name(facility_name)
+                
                 if not tab_name_mapped:
                     logger.warning(f"Skipping facility '{facility_name}' - no matching tab found in mapping")
                     continue
