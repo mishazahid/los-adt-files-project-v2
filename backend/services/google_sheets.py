@@ -873,13 +873,15 @@ class GoogleSheetsService:
     
     def _shorten_facility_name_for_chart(self, facility_name: str) -> str:
         """
-        Shorten facility name for chart display by removing prefixes.
-        Example: "Medilodge of Clare" -> "Clare"
+        Shorten facility name for chart display by removing prefixes and suffixes.
+        Examples: 
+            "Medilodge of Clare" -> "Clare"
+            "Autumn Woods Residential" -> "Autumn Woods"
         """
         if not facility_name:
             return facility_name
         
-        # Remove common prefixes
+        # Remove common prefixes and suffixes
         name = facility_name.strip()
         
         # Remove "Medilodge of " prefix
@@ -891,6 +893,10 @@ class GoogleSheetsService:
         # Remove "Medilodge at " prefix
         elif name.lower().startswith('medilodge at '):
             name = name[13:].strip()  # len('medilodge at ') = 13
+        
+        # Remove " Residential" suffix
+        if name.lower().endswith(' residential'):
+            name = name[:-12].strip()  # len(' residential') = 12
         
         return name
     
