@@ -775,8 +775,11 @@ class GoogleSheetsService:
                 if not facility_name or str(facility_name).strip() == "":
                     continue
                 
+                # Shorten facility name for chart display (remove "Medilodge of" prefix)
+                short_name = self._shorten_facility_name_for_chart(facility_name)
+                
                 # Build row data: [Facility, LOS Man Avg, LOS Med Avg, INC, GS, PPS]
-                row_data = [facility_name]
+                row_data = [short_name]
                 
                 for source_col, dest_col in column_mapping:
                     source_idx = source_col_indices[source_col]
@@ -867,6 +870,29 @@ class GoogleSheetsService:
             result = chr(65 + (col_idx % 26)) + result
             col_idx //= 26
         return result
+    
+    def _shorten_facility_name_for_chart(self, facility_name: str) -> str:
+        """
+        Shorten facility name for chart display by removing prefixes.
+        Example: "Medilodge of Clare" -> "Clare"
+        """
+        if not facility_name:
+            return facility_name
+        
+        # Remove common prefixes
+        name = facility_name.strip()
+        
+        # Remove "Medilodge of " prefix
+        if name.lower().startswith('medilodge of '):
+            name = name[13:].strip()  # len('medilodge of ') = 13
+        # Remove "Medilodge at the " prefix
+        elif name.lower().startswith('medilodge at the '):
+            name = name[17:].strip()  # len('medilodge at the ') = 17
+        # Remove "Medilodge at " prefix
+        elif name.lower().startswith('medilodge at '):
+            name = name[13:].strip()  # len('medilodge at ') = 13
+        
+        return name
     
     async def append_data(self, data: list, sheet_name: Optional[str] = None) -> bool:
         """
