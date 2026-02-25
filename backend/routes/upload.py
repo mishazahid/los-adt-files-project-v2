@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 @router.post("/files")
 async def upload_files(
     background_tasks: BackgroundTasks,
-    adt_files: Optional[List[UploadFile]] = File(None),
-    los_files: Optional[List[UploadFile]] = File(None),
-    visit_files: Optional[List[UploadFile]] = File(None),
+    adt_files: List[UploadFile] = File(default=[]),
+    los_files: List[UploadFile] = File(default=[]),
+    visit_files: List[UploadFile] = File(default=[]),
     facility_values: Optional[str] = Form(None),
     google_sheet_link: Optional[str] = Form(None),
     google_sheet_file: Optional[UploadFile] = File(None)

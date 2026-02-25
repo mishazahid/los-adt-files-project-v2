@@ -11,7 +11,7 @@ def check_env_file():
     """Check if .env file exists"""
     env_file = Path(".env")
     if not env_file.exists():
-        print("⚠️  Warning: .env file not found!")
+        print("Warning: .env file not found!")
         print("Please create a .env file with the following variables:")
         print("  - OPENAI_API_KEY=your_key")
         print("  - GOOGLE_CREDENTIALS_PATH=credentials.json")
@@ -27,7 +27,7 @@ def check_credentials():
     credentials_path = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
     creds_file = Path(credentials_path)
     if not creds_file.exists():
-        print(f"⚠️  Warning: {credentials_path} not found!")
+        print(f"Warning: {credentials_path} not found!")
         print("Google Drive/Sheets/Slides features will be disabled.")
         print("See SETUP.md for instructions on setting up Google credentials.")
 
@@ -51,7 +51,7 @@ def main():
     check_credentials()
     check_directories()
     
-    print("\n✅ Pre-flight checks complete!")
+    print("\nPre-flight checks complete!")
     print("Starting server on http://0.0.0.0:8000")
     print("Press Ctrl+C to stop the server\n")
     
@@ -73,8 +73,8 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n👋 Server stopped. Goodbye!")
+        print("\n\nServer stopped. Goodbye!")
     except Exception as e:
-        print(f"\n❌ Error starting server: {e}")
+        print(f"\nError starting server: {e}")
         sys.exit(1)
 

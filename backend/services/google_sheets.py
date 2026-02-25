@@ -129,7 +129,7 @@ class GoogleSheetsService:
 
     def _set_number_format(self, spreadsheet_id: str, tab_title: str, start_row: int = 2):
         """
-        Force columns B:AC to plain number format to avoid time/date display.
+        Force columns B:AG to plain number format to avoid time/date display.
         Applies from start_row to end of sheet.
         """
         sheet_id = self._get_sheet_id(spreadsheet_id, tab_title)
@@ -142,7 +142,7 @@ class GoogleSheetsService:
                         "sheetId": sheet_id,
                         "startRowIndex": start_row - 1,  # zero-based
                         "startColumnIndex": 1,  # column B
-                        "endColumnIndex": 29    # column AC (exclusive)
+                        "endColumnIndex": 33    # column AG (exclusive)
                     },
                     "cell": {
                         "userEnteredFormat": {
@@ -159,7 +159,7 @@ class GoogleSheetsService:
                 spreadsheetId=spreadsheet_id,
                 body={"requests": requests}
             ).execute()
-            logger.info(f"Applied numeric format to {tab_title}!B:AC")
+            logger.info(f"Applied numeric format to {tab_title}!B:AG")
         except Exception as e:
             logger.warning(f"Failed to apply numeric format to {tab_title}: {e}")
     
@@ -247,7 +247,7 @@ class GoogleSheetsService:
             
             # Read CSV file
             # Keep ratio columns as strings to prevent automatic time conversion
-            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
             dtype_dict = {col: str for col in ratio_columns}
             df = pd.read_csv(csv_file, dtype=dtype_dict)
             
@@ -270,8 +270,8 @@ class GoogleSheetsService:
 
             # Normalize values to numeric where possible to avoid time/text formatting
             # Use apply with map instead of deprecated applymap, and handle NaN values
-            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF) to preserve "count:total" format
-            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
+            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
             for col in df.columns:
                 if col not in ratio_columns:
                     df[col] = df[col].apply(lambda x: self._to_number(x) if pd.notna(x) else x)
@@ -357,11 +357,11 @@ class GoogleSheetsService:
             if len(values) > 1:
                 logger.info(f"First data row sample: {values[1][:5]}...")  # Log first 5 columns of first data row
 
-            # Normalize numeric columns B:AC to ensure numbers, not strings/times
-            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF) to preserve "count:total" format
-            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
-            values = self._normalize_numeric_columns(values, start_col=1, end_col=28, skip_columns=ratio_columns)
-            
+            # Normalize numeric columns B:AG to ensure numbers, not strings/times
+            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
+            values = self._normalize_numeric_columns(values, start_col=1, end_col=32, skip_columns=ratio_columns)
+
             # Prepend single quote to ratio columns to force Google Sheets to treat as text
             header = values[0]
             ratio_col_indices = [i for i, col in enumerate(header) if col in ratio_columns]
@@ -376,14 +376,14 @@ class GoogleSheetsService:
             try:
                 self.sheets_service.values().batchClear(
                     spreadsheetId=self.sheet_id,
-                    body={"ranges": [f"{self.sheet_tab}!AA:AC"]}
+                    body={"ranges": [f"{self.sheet_tab}!AE:AG"]}
                 ).execute()
             except Exception as e:
                 logger.warning(f"Could not clear AA:AC columns: {e}")
             
             # 2) Clear main data range to remove extra rows
             try:
-                range_name = f"{self.sheet_tab}!A1:Z10000"
+                range_name = f"{self.sheet_tab}!A1:AG10000"
                 self.sheets_service.values().clear(
                     spreadsheetId=self.sheet_id,
                     range=range_name
@@ -592,11 +592,11 @@ class GoogleSheetsService:
         try:
             
             # Read data from Summary tab of current sheet
-            # Use wider range to include GS, PPS, INC columns (AA, AB, AC)
+            # Use wider range to include GS, PPS, INC columns (AE, AF, AG)
             logger.info(f"Reading data from Summary tab of sheet {self.sheet_id}")
             source_data = self.sheets_service.values().get(
                 spreadsheetId=self.sheet_id,
-                range=f"{self.sheet_tab}!A:AC"
+                range=f"{self.sheet_tab}!A:AG"
             ).execute()
             
             source_values = source_data.get('values', [])
@@ -605,11 +605,11 @@ class GoogleSheetsService:
                 # Still return the sheet URL even if no data
                 return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
             
-            # Normalize numeric columns B:AC before writing to Test sheet
-            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF) to preserve "count:total" format
-            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
-            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=28, skip_columns=ratio_columns)
-            
+            # Normalize numeric columns B:AG before writing to Test sheet
+            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
+            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=32, skip_columns=ratio_columns)
+
             # Prepend single quote to ratio columns to force Google Sheets to treat as text
             if len(source_values) > 0:
                 header = source_values[0]
@@ -627,7 +627,7 @@ class GoogleSheetsService:
             logger.info(f"Clearing existing data in {test_sheet_tab} tab of Test sheet")
             self.sheets_service.values().clear(
                 spreadsheetId=test_sheet_id,
-                range=f"{test_sheet_tab}!A1:AC10000"
+                range=f"{test_sheet_tab}!A1:AG10000"
             ).execute()
             
             # Paste data starting at A1
@@ -644,7 +644,7 @@ class GoogleSheetsService:
             
             logger.info(f"Copied {result.get('updatedCells', 0)} cells to Test sheet Raw_Data tab")
 
-            # Force numeric format on Test sheet Raw_Data columns B:AC
+            # Force numeric format on Test sheet Raw_Data columns B:AG
             self._set_number_format(test_sheet_id, test_sheet_tab, start_row=2)
             
             # Update Summary tab B2 with quarter value if provided
@@ -713,7 +713,7 @@ class GoogleSheetsService:
             logger.info(f"Reading data from {raw_data_tab} tab")
             raw_data = self.sheets_service.values().get(
                 spreadsheetId=test_sheet_id,
-                range=f"{raw_data_tab}!A:AC"
+                range=f"{raw_data_tab}!A:AG"
             ).execute()
             
             raw_values = raw_data.get('values', [])

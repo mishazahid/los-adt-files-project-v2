@@ -206,7 +206,7 @@ class PipelineService:
                     # Read facility names from master_summary.csv
                     import pandas as pd
                     # Keep ratio columns as strings to prevent automatic time conversion
-                    ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF']
+                    ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
                     dtype_dict = {col: str for col in ratio_columns}
                     df = pd.read_csv(master_summary_path, dtype=dtype_dict)
                     facility_names = df['Facility'].unique().tolist() if 'Facility' in df.columns else []

@@ -366,6 +366,8 @@ def export_summarized_data(df, output_path, facility_name):
         # Calculate LOS by payer type
         los_managed_avg = 0
         los_medicare_avg = 0
+        managed_care_count = 0
+        medicare_a_count = 0
         
         if 'LOS' in df.columns and 'Payer Type' in df.columns:
             managed_care_data = df[df['Payer Type'] == 'Managed Care']['LOS']
@@ -373,6 +375,10 @@ def export_summarized_data(df, output_path, facility_name):
             
             los_managed_avg = managed_care_data.mean() if len(managed_care_data) > 0 else 0
             los_medicare_avg = medicare_data.mean() if len(medicare_data) > 0 else 0
+            
+            # Count unique patients per payer type
+            managed_care_count = len(df[df['Payer Type'] == 'Managed Care'])
+            medicare_a_count = len(df[df['Payer Type'] == 'Medicare A'])
         
         # Create discharge mapping (case-insensitive)
         # Note: This mapping is used ONLY for counting/categorization purposes.
@@ -456,6 +462,10 @@ def export_summarized_data(df, output_path, facility_name):
             'LOS Overall Avg': [round(los_avg, 2)],
             'LOS Man Avg': [round(los_managed_avg, 2)],
             'LOS Med Avg': [round(los_medicare_avg, 2)],
+            'Managed Care Count': [managed_care_count],
+            'Medicare A Count': [medicare_a_count],
+            'Managed Care Ratio': [f"{managed_care_count}:{patients_served}"],
+            'Medicare A Ratio': [f"{medicare_a_count}:{patients_served}"],
             'HD': [hd_ratio],
             'HDN': [hdn_ratio],
             'HT': [ht_ratio],
