@@ -225,8 +225,9 @@ class PipelineService:
                             # Read from uploaded file
                             await self._log(log_file, f"[{datetime.now()}] Reading metrics from uploaded file: {google_sheet_file}")
                             auto_metrics = self.sheets_service.fetch_facility_metrics_from_file(
-                                facility_names, 
-                                file_path=google_sheet_file
+                                facility_names,
+                                file_path=google_sheet_file,
+                                los_csv_dir=str(los_output_dir)
                             )
                         elif user_sheet_id:
                             # Fetch from Google Sheet using provided ID
@@ -243,7 +244,7 @@ class PipelineService:
                             if facility_name in auto_metrics:
                                 facility_values[facility_name] = auto_metrics[facility_name]
                                 metrics = auto_metrics[facility_name]
-                                await self._log(log_file, f"[{datetime.now()}] Auto-fetched for {facility_name}: GS={metrics.get('GS', 'N/A')}, PPS={metrics.get('PPS', 'N/A')}, INC={metrics.get('INC', 'N/A')}")
+                                await self._log(log_file, f"[{datetime.now()}] Auto-fetched for {facility_name}: GS={metrics.get('GS', 'N/A')}, PPS={metrics.get('PPS', 'N/A')}, INC={metrics.get('INC', 'N/A')}, GG_Gain_MC={metrics.get('GG_Gain_MC', 'N/A')}, GG_Gain_MA={metrics.get('GG_Gain_MA', 'N/A')}, GG_Gain_Overall={metrics.get('GG_Gain_Overall', 'N/A')}")
                             else:
                                 await self._log(log_file, f"[{datetime.now()}] [WARNING] Could not fetch metrics for {facility_name}")
                         

@@ -346,15 +346,165 @@ def merge_dataframes(adt_df, patient_df, visit_counts):
     return merged_df_with_visits
 
 
-def export_summarized_data(df, output_path, facility_name):
+def calculate_ltc_metrics(visit_df, facility_name):
+    """
+    Calculate Long-Term Care (LTC) encounter metrics for a specific facility.
+
+    Filters the charge capture data by facility name and POS containing "32"
+    (Nursing Facility place of service code) to count LTC encounters.
+
+    Args:
+        visit_df: Full charge capture DataFrame (all facilities)
+        facility_name: Dashboard facility name (e.g., "Medilodge of Wyoming")
+
+    Returns:
+        Tuple of (gross_ltc_encounters, unique_ltc_patients)
+    """
+    print(f"\n--- Calculating LTC Metrics for {facility_name} ---")
+
+    if visit_df is None or visit_df.empty:
+        print(f"  [WARNING] No visit data available for LTC calculation")
+        return 0, 0
+
+    # Check that required columns exist
+    if 'Facility' not in visit_df.columns or 'POS' not in visit_df.columns:
+        print(f"  [WARNING] Visit data missing 'Facility' or 'POS' column. Available: {list(visit_df.columns)}")
+        return 0, 0
+
+    def normalize_facility_name(name):
+        """Normalize facility name for matching between dashboard and charge capture."""
+        n = str(name).lower().strip()
+        # Remove common suffixes
+        for suffix in ['(m)', '- snf', '-snf', 'llc', 'health care', 'healthcare']:
+            n = n.replace(suffix, '')
+        # Normalize "ste." to "st."
+        n = n.replace('ste.', 'st.')
+        # Strip extra whitespace
+        n = ' '.join(n.split())
+        n = n.strip(' ,.')
+        return n
+
+    normalized_dashboard = normalize_facility_name(facility_name)
+
+    # Find matching facility rows in charge capture
+    matched_mask = pd.Series([False] * len(visit_df), index=visit_df.index)
+
+    for idx, row_facility in visit_df['Facility'].items():
+        normalized_cc = normalize_facility_name(row_facility)
+        if (normalized_cc.startswith(normalized_dashboard) or
+            normalized_dashboard.startswith(normalized_cc)):
+            matched_mask.at[idx] = True
+
+    facility_rows = visit_df[matched_mask]
+    print(f"  Matched {len(facility_rows)} charge capture rows for '{facility_name}'")
+
+    if facility_rows.empty:
+        print(f"  [INFO] No matching facility found in charge capture data")
+        return 0, 0
+
+    # Filter for POS containing "32"
+    pos_32_mask = facility_rows['POS'].astype(str).str.contains('32', na=False)
+    ltc_rows = facility_rows[pos_32_mask]
+
+    gross_ltc_encounters = len(ltc_rows)
+    print(f"  Gross LTC encounters (POS=32): {gross_ltc_encounters}")
+
+    if gross_ltc_encounters == 0:
+        return 0, 0
+
+    # Count unique patients - prefer Patient ID, fall back to name
+    if 'Patient ID' in ltc_rows.columns and ltc_rows['Patient ID'].notna().any():
+        unique_ltc_patients = ltc_rows['Patient ID'].nunique()
+    else:
+        # Fall back to first + last name
+        first_name_cols = [c for c in ltc_rows.columns if 'first' in c.lower() and 'name' in c.lower()]
+        last_name_cols = [c for c in ltc_rows.columns if 'last' in c.lower() and 'name' in c.lower()]
+        if first_name_cols and last_name_cols:
+            unique_ltc_patients = ltc_rows.groupby([first_name_cols[0], last_name_cols[0]]).ngroups
+        else:
+            unique_ltc_patients = gross_ltc_encounters  # Can't deduplicate
+
+    print(f"  Unique LTC patients: {unique_ltc_patients}")
+
+    return gross_ltc_encounters, unique_ltc_patients
+
+
+def calculate_injection_metrics(visit_df, facility_name):
+    """
+    Calculate injection metrics for a specific facility.
+    Filters charge capture data by facility name and 6 injection CPT codes.
+
+    Returns:
+        Dict with keys: total, 20600, 20604, 20605, 20606, 20610, 20611
+        Each value is the count of rows containing that CPT code.
+    """
+    INJECTION_CPT_CODES = ['20600', '20604', '20605', '20606', '20610', '20611']
+
+    print(f"\n--- Calculating Injection Metrics for {facility_name} ---")
+
+    if visit_df is None or visit_df.empty:
+        print(f"  [WARNING] No visit data available for injection calculation")
+        return {code: 0 for code in INJECTION_CPT_CODES + ['total']}
+
+    if 'Facility' not in visit_df.columns or 'CPT Codes' not in visit_df.columns:
+        print(f"  [WARNING] Visit data missing 'Facility' or 'CPT Codes' column. Available: {list(visit_df.columns)}")
+        return {code: 0 for code in INJECTION_CPT_CODES + ['total']}
+
+    def normalize_facility_name(name):
+        """Normalize facility name for matching between dashboard and charge capture."""
+        n = str(name).lower().strip()
+        for suffix in ['(m)', '- snf', '-snf', 'llc', 'health care', 'healthcare']:
+            n = n.replace(suffix, '')
+        n = n.replace('ste.', 'st.')
+        n = ' '.join(n.split())
+        n = n.strip(' ,.')
+        return n
+
+    normalized_dashboard = normalize_facility_name(facility_name)
+
+    # Find matching facility rows in charge capture
+    matched_mask = pd.Series([False] * len(visit_df), index=visit_df.index)
+
+    for idx, row_facility in visit_df['Facility'].items():
+        normalized_cc = normalize_facility_name(row_facility)
+        if (normalized_cc.startswith(normalized_dashboard) or
+            normalized_dashboard.startswith(normalized_cc)):
+            matched_mask.at[idx] = True
+
+    facility_rows = visit_df[matched_mask]
+    print(f"  Matched {len(facility_rows)} charge capture rows for '{facility_name}'")
+
+    if facility_rows.empty:
+        print(f"  [INFO] No matching facility found in charge capture data")
+        return {code: 0 for code in INJECTION_CPT_CODES + ['total']}
+
+    # Count rows containing each CPT code (CPT Codes column can be comma-separated)
+    cpt_col = facility_rows['CPT Codes'].astype(str)
+    results = {}
+    total = 0
+    for code in INJECTION_CPT_CODES:
+        count = cpt_col.str.contains(code, na=False).sum()
+        results[code] = count
+        total += count
+        print(f"  CPT {code}: {count}")
+
+    results['total'] = total
+    print(f"  Total Injections: {total}")
+
+    return results
+
+
+def export_summarized_data(df, output_path, facility_name, ltc_gross_encounters=0, ltc_unique_patients=0, injection_metrics=None):
     """Export summarized data CSV with key metrics."""
     print(f"\n--- Exporting Summarized Data ---")
     
     try:
+        inj = injection_metrics if injection_metrics is not None else {}
+
         # Create output directory if it doesn't exist
         output_dir = Path(output_path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Calculate basic metrics
         patients_served = len(df)
         total_visits = df['Number of Visits by Puzzle Provider'].sum() if 'Number of Visits by Puzzle Provider' in df.columns else 0
@@ -481,7 +631,16 @@ def export_summarized_data(df, output_path, facility_name):
             '%Cus': [round(pct_custodial, 2)],
             '%AL': [round(pct_assisted_living, 2)],
             '%OT': [round(pct_other, 2)],
-            '%SNF': [round(pct_snf, 2)]
+            '%SNF': [round(pct_snf, 2)],
+            'Total Gross LTC Encounters': [ltc_gross_encounters],
+            'Patients Served (LTC)': [ltc_unique_patients],
+            'Inj_Total': [inj.get('total', 0)],
+            'Inj_20600': [inj.get('20600', 0)],
+            'Inj_20604': [inj.get('20604', 0)],
+            'Inj_20605': [inj.get('20605', 0)],
+            'Inj_20606': [inj.get('20606', 0)],
+            'Inj_20610': [inj.get('20610', 0)],
+            'Inj_20611': [inj.get('20611', 0)]
         }
         
         summarized_df = pd.DataFrame(summarized_data)
@@ -514,7 +673,16 @@ def export_summarized_data(df, output_path, facility_name):
         print(f"    %AL: {pct_assisted_living:.2f}%")
         print(f"    %OT: {pct_other:.2f}%")
         print(f"    %SNF: {pct_snf:.2f}%")
-        
+        print(f"    Total Gross LTC Encounters: {ltc_gross_encounters}")
+        print(f"    Patients Served (LTC): {ltc_unique_patients}")
+        print(f"    Inj Total: {inj.get('total', 0)}")
+        print(f"    Inj 20600: {inj.get('20600', 0)}")
+        print(f"    Inj 20604: {inj.get('20604', 0)}")
+        print(f"    Inj 20605: {inj.get('20605', 0)}")
+        print(f"    Inj 20606: {inj.get('20606', 0)}")
+        print(f"    Inj 20610: {inj.get('20610', 0)}")
+        print(f"    Inj 20611: {inj.get('20611', 0)}")
+
         return summarized_df
         
     except Exception as e:
@@ -1019,12 +1187,18 @@ def process_file_combination(adt_file: str, patient_file: str, visit_file_or_fol
         facility_name_from_file = extract_facility_name_from_filename(patient_file, 'patient')
         facility_name = format_facility_name_for_display(facility_name_from_file)
     
+    # Calculate LTC metrics from the charge capture data
+    ltc_gross, ltc_unique = calculate_ltc_metrics(visit_df, facility_name)
+    inj_metrics = calculate_injection_metrics(visit_df, facility_name)
+
     # Create summarized data output path
     output_dir = Path(output_file).parent
     summarized_filename = f"summarized_{Path(output_file).stem}.csv"
     summarized_output_path = output_dir / summarized_filename
-    
-    export_summarized_data(final_df, str(summarized_output_path), facility_name)
+
+    export_summarized_data(final_df, str(summarized_output_path), facility_name,
+                           ltc_gross_encounters=ltc_gross, ltc_unique_patients=ltc_unique,
+                           injection_metrics=inj_metrics)
 
 
 def main():

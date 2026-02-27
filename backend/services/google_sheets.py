@@ -129,7 +129,7 @@ class GoogleSheetsService:
 
     def _set_number_format(self, spreadsheet_id: str, tab_title: str, start_row: int = 2):
         """
-        Force columns B:AG to plain number format to avoid time/date display.
+        Force columns B:AZ to plain number format to avoid time/date display.
         Applies from start_row to end of sheet.
         """
         sheet_id = self._get_sheet_id(spreadsheet_id, tab_title)
@@ -142,7 +142,7 @@ class GoogleSheetsService:
                         "sheetId": sheet_id,
                         "startRowIndex": start_row - 1,  # zero-based
                         "startColumnIndex": 1,  # column B
-                        "endColumnIndex": 33    # column AG (exclusive)
+                        "endColumnIndex": 52    # column AZ (exclusive)
                     },
                     "cell": {
                         "userEnteredFormat": {
@@ -159,7 +159,7 @@ class GoogleSheetsService:
                 spreadsheetId=spreadsheet_id,
                 body={"requests": requests}
             ).execute()
-            logger.info(f"Applied numeric format to {tab_title}!B:AG")
+            logger.info(f"Applied numeric format to {tab_title}!B:AZ")
         except Exception as e:
             logger.warning(f"Failed to apply numeric format to {tab_title}: {e}")
     
@@ -291,11 +291,20 @@ class GoogleSheetsService:
                     df['PPS'] = ''
                 if 'INC' not in df.columns:
                     df['INC'] = ''
-                
+                if 'GG_Gain_MC' not in df.columns:
+                    df['GG_Gain_MC'] = ''
+                if 'GG_Gain_MA' not in df.columns:
+                    df['GG_Gain_MA'] = ''
+                if 'GG_Gain_Overall' not in df.columns:
+                    df['GG_Gain_Overall'] = ''
+
                 # Explicitly reset values to avoid stale data when facility count shrinks
                 df['GS'] = ''
                 df['PPS'] = ''
                 df['INC'] = ''
+                df['GG_Gain_MC'] = ''
+                df['GG_Gain_MA'] = ''
+                df['GG_Gain_Overall'] = ''
                 
                 # Populate GS, PPS, INC values for each facility
                 if 'Facility' in df.columns:
@@ -329,8 +338,14 @@ class GoogleSheetsService:
                                 df.loc[mask, 'PPS'] = values['PPS']
                             if 'INC' in values:
                                 df.loc[mask, 'INC'] = values['INC']
+                            if 'GG_Gain_MC' in values:
+                                df.loc[mask, 'GG_Gain_MC'] = values['GG_Gain_MC']
+                            if 'GG_Gain_MA' in values:
+                                df.loc[mask, 'GG_Gain_MA'] = values['GG_Gain_MA']
+                            if 'GG_Gain_Overall' in values:
+                                df.loc[mask, 'GG_Gain_Overall'] = values['GG_Gain_Overall']
                             matched_facilities = df.loc[mask, 'Facility'].unique().tolist()
-                            logger.info(f"Populated GS, PPS, INC for '{facility_name}': matched {mask.sum()} rows with facilities: {matched_facilities}")
+                            logger.info(f"Populated GS, PPS, INC, GG_Gain for '{facility_name}': matched {mask.sum()} rows with facilities: {matched_facilities}")
                         else:
                             logger.warning(f"No match found for facility '{facility_name}' in CSV. Available facilities: {list(unique_facilities)}")
                 else:
@@ -360,7 +375,7 @@ class GoogleSheetsService:
             # Normalize numeric columns B:AG to ensure numbers, not strings/times
             # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
             ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
-            values = self._normalize_numeric_columns(values, start_col=1, end_col=32, skip_columns=ratio_columns)
+            values = self._normalize_numeric_columns(values, start_col=1, end_col=40, skip_columns=ratio_columns)
 
             # Prepend single quote to ratio columns to force Google Sheets to treat as text
             header = values[0]
@@ -376,14 +391,14 @@ class GoogleSheetsService:
             try:
                 self.sheets_service.values().batchClear(
                     spreadsheetId=self.sheet_id,
-                    body={"ranges": [f"{self.sheet_tab}!AE:AG"]}
+                    body={"ranges": [f"{self.sheet_tab}!AE:AZ"]}
                 ).execute()
             except Exception as e:
                 logger.warning(f"Could not clear AA:AC columns: {e}")
             
             # 2) Clear main data range to remove extra rows
             try:
-                range_name = f"{self.sheet_tab}!A1:AG10000"
+                range_name = f"{self.sheet_tab}!A1:AZ10000"
                 self.sheets_service.values().clear(
                     spreadsheetId=self.sheet_id,
                     range=range_name
@@ -592,11 +607,11 @@ class GoogleSheetsService:
         try:
             
             # Read data from Summary tab of current sheet
-            # Use wider range to include GS, PPS, INC columns (AE, AF, AG)
+            # Use wider range to include GS, PPS, INC columns (which shift right as new columns are added)
             logger.info(f"Reading data from Summary tab of sheet {self.sheet_id}")
             source_data = self.sheets_service.values().get(
                 spreadsheetId=self.sheet_id,
-                range=f"{self.sheet_tab}!A:AG"
+                range=f"{self.sheet_tab}!A:AZ"
             ).execute()
             
             source_values = source_data.get('values', [])
@@ -608,7 +623,7 @@ class GoogleSheetsService:
             # Normalize numeric columns B:AG before writing to Test sheet
             # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
             ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
-            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=32, skip_columns=ratio_columns)
+            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=40, skip_columns=ratio_columns)
 
             # Prepend single quote to ratio columns to force Google Sheets to treat as text
             if len(source_values) > 0:
@@ -623,11 +638,11 @@ class GoogleSheetsService:
             logger.info(f"Found {len(source_values)} rows to copy to Test sheet")
             
             # Clear existing data in Raw_Data tab of Test sheet
-            # Clear wider range to include GS, PPS, INC columns
+            # Clear wider range to include GS, PPS, INC columns (which shift right as new columns are added)
             logger.info(f"Clearing existing data in {test_sheet_tab} tab of Test sheet")
             self.sheets_service.values().clear(
                 spreadsheetId=test_sheet_id,
-                range=f"{test_sheet_tab}!A1:AG10000"
+                range=f"{test_sheet_tab}!A1:AZ10000"
             ).execute()
             
             # Paste data starting at A1
@@ -674,7 +689,7 @@ class GoogleSheetsService:
     
     async def copy_raw_data_to_facility_data(self) -> bool:
         """
-        Copy 6 columns from Raw_Data tab to Facility_Data tab in Test Fac sheet.
+        Copy columns from Raw_Data tab to Facility_Data tab in Test Fac sheet.
         Column structure in Facility_Data:
         - Column A: Facilities (facility names from Raw_Data)
         - Column B: Managed Care Average LOS (from Raw_Data "LOS Man Avg")
@@ -682,11 +697,21 @@ class GoogleSheetsService:
         - Column D: Section GG Improv (from Raw_Data "INC")
         - Column E: 5 Day Mean (from Raw_Data "GS")
         - Column F: End of PPS Mean (from Raw_Data "PPS")
-        
-        Clears only A1:A9 and F1:F9 in Facility_Data tab (preserves graphs).
+        - Column G: Avg GG Gain - MC (from Raw_Data "GG_Gain_MC")
+        - Column H: Avg GG Gain - MA (from Raw_Data "GG_Gain_MA")
+        - Column I: Avg GG Gain - Overall (from Raw_Data "GG_Gain_Overall")
+        - Column J: Total Injections (from Raw_Data "Inj_Total")
+        - Column K: Inj 20600 (from Raw_Data "Inj_20600")
+        - Column L: Inj 20604 (from Raw_Data "Inj_20604")
+        - Column M: Inj 20605 (from Raw_Data "Inj_20605")
+        - Column N: Inj 20606 (from Raw_Data "Inj_20606")
+        - Column O: Inj 20610 (from Raw_Data "Inj_20610")
+        - Column P: Inj 20611 (from Raw_Data "Inj_20611")
+
+        Clears A2:P100 in Facility_Data tab (preserves header and graphs).
         Copies all facilities from Raw_Data.
-        Adds "Network Average" row at the end with averages for columns B-F.
-        
+        Adds "Network Average" row at the end with averages for columns B-P.
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -705,15 +730,25 @@ class GoogleSheetsService:
                 ("LOS Man Avg", "B"),  # Managed Care Average LOS
                 ("LOS Med Avg", "C"),  # Medicare A Average LOS
                 ("INC", "D"),          # Section GG Improv
-                ("GS", "E"),          # 5 Day Mean
-                ("PPS", "F")          # End of PPS Mean
+                ("GS", "E"),           # 5 Day Mean
+                ("PPS", "F"),          # End of PPS Mean
+                ("GG_Gain_MC", "G"),   # Avg GG Gain - Managed Care
+                ("GG_Gain_MA", "H"),   # Avg GG Gain - Medicare A
+                ("GG_Gain_Overall", "I"),  # Avg GG Gain - Overall
+                ("Inj_Total", "J"),       # Total Injections
+                ("Inj_20600", "K"),       # Inj 20600
+                ("Inj_20604", "L"),       # Inj 20604
+                ("Inj_20605", "M"),       # Inj 20605
+                ("Inj_20606", "N"),       # Inj 20606
+                ("Inj_20610", "O"),       # Inj 20610
+                ("Inj_20611", "P")        # Inj 20611
             ]
             
             # Read Raw_Data tab
             logger.info(f"Reading data from {raw_data_tab} tab")
             raw_data = self.sheets_service.values().get(
                 spreadsheetId=test_sheet_id,
-                range=f"{raw_data_tab}!A:AG"
+                range=f"{raw_data_tab}!A:AZ"
             ).execute()
             
             raw_values = raw_data.get('values', [])
@@ -743,21 +778,24 @@ class GoogleSheetsService:
                     logger.warning(f"Source column '{source_col}' not found in Raw_Data headers")
                     return False
             
-            # Clear A2:F100 in Facility_Data tab (preserve header row 1, clear all old data)
+            # Clear A2:P100 in Facility_Data tab (preserve header row 1, clear all old data)
             # This ensures ALL previous data is removed before writing new data
-            logger.info(f"Clearing data range A2:F100 in {facility_data_tab} tab (preserving header and graphs)")
+            logger.info(f"Clearing data range A2:P100 in {facility_data_tab} tab (preserving header and graphs)")
             self.sheets_service.values().clear(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!A2:F100"
+                range=f"{facility_data_tab}!A2:P100"
             ).execute()
             logger.info(f"Successfully cleared old data from {facility_data_tab} tab")
             
             # Write headers in row 1 if needed (or update them)
-            headers = ["Facilities", "Managed Care Average LOS", "Medicare A Average LOS", 
-                      "Section GG Improv", "5 Day Mean", "End of PPS Mean"]
+            headers = ["Facilities", "Managed Care Average LOS", "Medicare A Average LOS",
+                      "Section GG Improv", "5 Day Mean", "End of PPS Mean",
+                      "Avg GG Gain - MC", "Avg GG Gain - MA", "Avg GG Gain - Overall",
+                      "Total Injections", "Inj 20600", "Inj 20604",
+                      "Inj 20605", "Inj 20606", "Inj 20610", "Inj 20611"]
             self.sheets_service.values().update(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!A1:F1",
+                range=f"{facility_data_tab}!A1:P1",
                 valueInputOption='USER_ENTERED',
                 body={'values': [headers]}
             ).execute()
@@ -813,7 +851,7 @@ class GoogleSheetsService:
                 
                 self.sheets_service.values().update(
                     spreadsheetId=test_sheet_id,
-                    range=f"{facility_data_tab}!A{start_row}:F{end_row}",
+                    range=f"{facility_data_tab}!A{start_row}:P{end_row}",
                     valueInputOption='USER_ENTERED',
                     body={'values': batch}
                 ).execute()
@@ -831,7 +869,7 @@ class GoogleSheetsService:
                 body={'values': [["Network Average"]]}
             ).execute()
             
-            # Calculate and write averages for columns B-F
+            # Calculate and write averages for columns B-P
             avg_row_data = ["Network Average"]
             for source_col, dest_col in column_mapping:
                 if dest_col in numeric_values and numeric_values[dest_col]:
@@ -841,10 +879,10 @@ class GoogleSheetsService:
                 else:
                     avg_row_data.append("")
             
-            # Write averages to columns B-F
+            # Write averages to columns B-P
             self.sheets_service.values().update(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!B{network_avg_row}:F{network_avg_row}",
+                range=f"{facility_data_tab}!B{network_avg_row}:P{network_avg_row}",
                 valueInputOption='USER_ENTERED',
                 body={'values': [avg_row_data[1:]]}  # Skip first element (label)
             ).execute()
@@ -1169,20 +1207,176 @@ class GoogleSheetsService:
         
         return results
     
-    def fetch_facility_metrics_from_file(self, facility_names: list, file_path: str) -> dict:
+    def _find_los_csv_for_facility(self, facility_name: str, los_csv_dir: str):
+        """Find the LOS CSV file for a given facility name."""
+        import glob as glob_mod
+        import re
+
+        los_dir = Path(los_csv_dir)
+        if not los_dir.exists():
+            return None
+
+        available_files = list(los_dir.glob("*.csv"))
+        if not available_files:
+            return None
+
+        def normalize_name(name):
+            """Normalize facility name for matching."""
+            n = name.lower().strip()
+            # Remove common prefixes
+            for prefix in ["medilodge of ", "medilodge at the ", "medilodge at "]:
+                if n.startswith(prefix):
+                    n = n[len(prefix):]
+            n = re.sub(r'[^a-z0-9]+', '_', n).strip('_')
+            return n
+
+        normalized_facility = normalize_name(facility_name)
+
+        # Try direct match on normalized names
+        for f in available_files:
+            stem = f.stem  # filename without extension
+            normalized_file = normalize_name(stem)
+            if normalized_file == normalized_facility:
+                return f
+
+        # Fall back to contains-matching
+        for f in available_files:
+            stem = f.stem
+            normalized_file = normalize_name(stem)
+            if normalized_facility in normalized_file or normalized_file in normalized_facility:
+                return f
+
+        # Try matching on key words from facility name
+        words = [w for w in normalized_facility.split('_') if len(w) > 2]
+        for f in available_files:
+            stem_lower = f.stem.lower()
+            if all(w in stem_lower for w in words):
+                return f
+
+        return None
+
+    def _calculate_payer_gg_gains(self, facility_name: str, complete_row_details: list, los_csv_dir: str) -> dict:
+        """
+        Calculate payer-level average GG gains by cross-referencing patient names
+        from the GG Excel with payer information from LOS CSV files.
+
+        Args:
+            facility_name: Name of the facility
+            complete_row_details: List of dicts with first_name, last_name, gs, pps, gain
+            los_csv_dir: Path to directory containing LOS CSV files
+
+        Returns:
+            Dict with GG_Gain_MC, GG_Gain_MA, GG_Gain_Overall keys
+        """
+        result = {}
+
+        # Overall average gain is always calculable (same as INC)
+        all_gains = [row["gain"] for row in complete_row_details]
+        if all_gains:
+            result["GG_Gain_Overall"] = round(sum(all_gains) / len(all_gains), 2)
+
+        # Find the LOS CSV for this facility
+        los_csv_path = self._find_los_csv_for_facility(facility_name, los_csv_dir)
+        if not los_csv_path:
+            logger.warning(f"No LOS CSV found for facility '{facility_name}' in {los_csv_dir}")
+            result.setdefault("GG_Gain_MC", 0)
+            result.setdefault("GG_Gain_MA", 0)
+            return result
+
+        try:
+            los_df = pd.read_csv(los_csv_path)
+            logger.info(f"Loaded LOS CSV for '{facility_name}': {los_csv_path.name} ({len(los_df)} rows)")
+
+            # Find first_name and last_name columns (case-insensitive)
+            los_cols = {c.lower().strip(): c for c in los_df.columns}
+            fn_col = los_cols.get("first_name") or los_cols.get("first name") or los_cols.get("firstname")
+            ln_col = los_cols.get("last_name") or los_cols.get("last name") or los_cols.get("lastname")
+            payer_col = los_cols.get("payer_type") or los_cols.get("payer type") or los_cols.get("payertype") or los_cols.get("payer")
+
+            if not fn_col or not ln_col or not payer_col:
+                logger.warning(f"LOS CSV missing required columns (first_name, last_name, payer_type). Columns: {list(los_df.columns)}")
+                result.setdefault("GG_Gain_MC", 0)
+                result.setdefault("GG_Gain_MA", 0)
+                return result
+
+            # Build lookup from LOS data: (first_name_lower, last_name_lower) -> payer_type
+            los_lookup = {}
+            los_partial_lookup = {}  # (first_name_lower, last_name_first3) -> payer_type
+            for _, los_row in los_df.iterrows():
+                fn = str(los_row[fn_col]).strip().lower() if pd.notna(los_row[fn_col]) else ""
+                ln = str(los_row[ln_col]).strip().lower() if pd.notna(los_row[ln_col]) else ""
+                payer = str(los_row[payer_col]).strip() if pd.notna(los_row[payer_col]) else ""
+                if fn and ln and payer:
+                    los_lookup[(fn, ln)] = payer
+                    if len(ln) >= 3:
+                        los_partial_lookup[(fn, ln[:3])] = payer
+
+            # Match each GG patient to payer
+            payer_gains = {}  # payer_type -> list of gains
+            matched_count = 0
+            for patient in complete_row_details:
+                fn = patient["first_name"].lower()
+                ln = patient["last_name"].lower()
+                gain = patient["gain"]
+
+                if not fn or not ln:
+                    continue
+
+                # Exact match first
+                payer = los_lookup.get((fn, ln))
+
+                # Partial last name match (first 3 chars + same first name)
+                if not payer and len(ln) >= 3:
+                    payer = los_partial_lookup.get((fn, ln[:3]))
+
+                if payer:
+                    matched_count += 1
+                    if payer not in payer_gains:
+                        payer_gains[payer] = []
+                    payer_gains[payer].append(gain)
+                else:
+                    logger.debug(f"No payer match for patient {patient['first_name']} {patient['last_name']}")
+
+            logger.info(f"Payer matching for '{facility_name}': {matched_count}/{len(complete_row_details)} patients matched. Payers: {list(payer_gains.keys())}")
+
+            # Calculate per-payer averages
+            mc_gains = []
+            ma_gains = []
+            for payer_type, gains in payer_gains.items():
+                payer_lower = payer_type.lower()
+                if "managed" in payer_lower or payer_lower == "mc":
+                    mc_gains.extend(gains)
+                elif "medicare" in payer_lower or payer_lower == "ma" or "med a" in payer_lower:
+                    ma_gains.extend(gains)
+
+            result["GG_Gain_MC"] = round(sum(mc_gains) / len(mc_gains), 2) if mc_gains else 0
+            result["GG_Gain_MA"] = round(sum(ma_gains) / len(ma_gains), 2) if ma_gains else 0
+
+            logger.info(f"Payer GG gains for '{facility_name}': MC={result['GG_Gain_MC']}, MA={result['GG_Gain_MA']}, Overall={result['GG_Gain_Overall']}")
+
+        except Exception as e:
+            logger.error(f"Error calculating payer GG gains for '{facility_name}': {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            result.setdefault("GG_Gain_MC", 0)
+            result.setdefault("GG_Gain_MA", 0)
+
+        return result
+
+    def fetch_facility_metrics_from_file(self, facility_names: list, file_path: str, los_csv_dir: str = None) -> dict:
         """
         Fetch GS, PPS, and INC values from an uploaded Excel/CSV file for given facilities.
         The file should have multiple sheets/tabs, one for each facility.
-        
+
         Args:
             facility_names: List of facility names (e.g., ["Medilodge of Farmington", "Medilodge of Clare"])
             file_path: Path to the uploaded Excel/CSV file
-        
+            los_csv_dir: Optional path to directory containing LOS CSV files for payer-level GG gain calculation
+
         Returns:
             Dictionary mapping facility names to their metrics:
             {
-                "Medilodge of Farmington": {"GS": 15.5, "PPS": 18.2, "INC": 2.7},
-                "Medilodge of Clare": {"GS": 12.3, "PPS": 14.8, "INC": 2.5},
+                "Medilodge of Farmington": {"GS": 15.5, "PPS": 18.2, "INC": 2.7, "GG_Gain_MC": 1.5, "GG_Gain_MA": 3.2, "GG_Gain_Overall": 2.7},
                 ...
             }
         """
@@ -1255,26 +1449,29 @@ class GoogleSheetsService:
                     
                     complete_rows_y = []
                     complete_rows_an = []
-                    
+                    complete_row_details = []  # Track per-patient data for payer matching
+
                     # Find rows where all columns L-Y and AA-AN are populated
                     for row_idx in range(len(l_y_data)):
                         row_l_y = l_y_data[row_idx]
                         row_aa_an = aa_an_data[row_idx] if row_idx < len(aa_an_data) else []
-                        
+
                         # Check if all columns L-Y are populated (14 columns)
                         l_y_complete = len(row_l_y) >= 14 and all(
-                            pd.notna(cell) and str(cell).strip() != '' 
+                            pd.notna(cell) and str(cell).strip() != ''
                             for cell in row_l_y[:14]
                         )
-                        
+
                         # Check if all columns AA-AN are populated (14 columns)
                         aa_an_complete = len(row_aa_an) >= 14 and all(
-                            pd.notna(cell) and str(cell).strip() != '' 
+                            pd.notna(cell) and str(cell).strip() != ''
                             for cell in row_aa_an[:14]
                         )
-                        
+
                         # Row is complete only if BOTH sections are fully populated
                         if l_y_complete and aa_an_complete:
+                            y_num = None
+                            an_num = None
                             # Get column Y value (index 13 in L-Y range)
                             if len(row_l_y) > col_y_index:
                                 y_value = row_l_y[col_y_index]
@@ -1283,7 +1480,7 @@ class GoogleSheetsService:
                                     complete_rows_y.append(y_num)
                                 except (ValueError, TypeError):
                                     pass
-                            
+
                             # Get column AN value (index 13 in AA-AN range)
                             if len(row_aa_an) > col_an_index:
                                 an_value = row_aa_an[col_an_index]
@@ -1292,19 +1489,45 @@ class GoogleSheetsService:
                                     complete_rows_an.append(an_num)
                                 except (ValueError, TypeError):
                                     pass
-                    
+
+                            # Track per-patient details for payer matching
+                            if y_num is not None and an_num is not None:
+                                actual_row = row_idx + 3  # offset back to df row index
+                                first_name = ""
+                                last_name = ""
+                                # Column H = index 7, Column I = index 8
+                                if len(df.columns) > 8:
+                                    fn_val = df.iloc[actual_row, 7] if actual_row < len(df) else ""
+                                    ln_val = df.iloc[actual_row, 8] if actual_row < len(df) else ""
+                                    first_name = str(fn_val).strip() if pd.notna(fn_val) else ""
+                                    last_name = str(ln_val).strip() if pd.notna(ln_val) else ""
+                                complete_row_details.append({
+                                    "first_name": first_name,
+                                    "last_name": last_name,
+                                    "gs": y_num,
+                                    "pps": an_num,
+                                    "gain": an_num - y_num
+                                })
+
                     # Calculate averages
                     if complete_rows_y and complete_rows_an and len(complete_rows_y) == len(complete_rows_an):
                         gs = sum(complete_rows_y) / len(complete_rows_y)
                         pps = sum(complete_rows_an) / len(complete_rows_an)
                         inc = pps - gs
-                        
+
                         results[facility_name] = {
                             "GS": round(gs, 2),
                             "PPS": round(pps, 2),
                             "INC": round(inc, 2)
                         }
-                        
+
+                        # Calculate payer-level GG gains if LOS CSV directory provided
+                        if los_csv_dir and complete_row_details:
+                            payer_gains = self._calculate_payer_gg_gains(
+                                facility_name, complete_row_details, los_csv_dir
+                            )
+                            results[facility_name].update(payer_gains)
+
                         logger.info(f"Calculated metrics for '{facility_name}' (sheet: {tab_name}): "
                                   f"GS={gs:.2f}, PPS={pps:.2f}, INC={inc:.2f} "
                                   f"(from {len(complete_rows_y)} complete rows)")
