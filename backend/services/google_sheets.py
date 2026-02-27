@@ -305,6 +305,18 @@ class GoogleSheetsService:
                 df['GG_Gain_MC'] = ''
                 df['GG_Gain_MA'] = ''
                 df['GG_Gain_Overall'] = ''
+
+                # Check if any facility has NP_ keys (comparison mode)
+                has_np_keys = any(
+                    any(k.startswith('NP_') for k in vals.keys())
+                    for vals in facility_values.values()
+                    if isinstance(vals, dict)
+                )
+                if has_np_keys:
+                    for np_col in ['NP_GS', 'NP_PPS', 'NP_INC', 'NP_GG_Gain_MC', 'NP_GG_Gain_MA', 'NP_GG_Gain_Overall']:
+                        if np_col not in df.columns:
+                            df[np_col] = ''
+                        df[np_col] = ''
                 
                 # Populate GS, PPS, INC values for each facility
                 if 'Facility' in df.columns:
@@ -344,6 +356,10 @@ class GoogleSheetsService:
                                 df.loc[mask, 'GG_Gain_MA'] = values['GG_Gain_MA']
                             if 'GG_Gain_Overall' in values:
                                 df.loc[mask, 'GG_Gain_Overall'] = values['GG_Gain_Overall']
+                            # Populate NP_ columns if present
+                            for np_key in ['NP_GS', 'NP_PPS', 'NP_INC', 'NP_GG_Gain_MC', 'NP_GG_Gain_MA', 'NP_GG_Gain_Overall']:
+                                if np_key in values and np_key in df.columns:
+                                    df.loc[mask, np_key] = values[np_key]
                             matched_facilities = df.loc[mask, 'Facility'].unique().tolist()
                             logger.info(f"Populated GS, PPS, INC, GG_Gain for '{facility_name}': matched {mask.sum()} rows with facilities: {matched_facilities}")
                         else:
@@ -687,7 +703,7 @@ class GoogleSheetsService:
             # Still return the sheet URL even on error
             return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
     
-    async def copy_raw_data_to_facility_data(self) -> bool:
+    async def copy_raw_data_to_facility_data(self, comparison_mode: bool = False) -> bool:
         """
         Copy columns from Raw_Data tab to Facility_Data tab in Test Fac sheet.
         Column structure in Facility_Data:
@@ -743,6 +759,19 @@ class GoogleSheetsService:
                 ("Inj_20610", "O"),       # Inj 20610
                 ("Inj_20611", "P")        # Inj 20611
             ]
+
+            # Extend with NP_ columns when comparison mode is enabled
+            if comparison_mode:
+                column_mapping.extend([
+                    ("NP_LOS Man Avg", "Q"),    # NP Managed Care Average LOS
+                    ("NP_LOS Med Avg", "R"),    # NP Medicare A Average LOS
+                    ("NP_GS", "S"),             # NP 5 Day Mean
+                    ("NP_PPS", "T"),            # NP End of PPS Mean
+                    ("NP_INC", "U"),            # NP Section GG Improv
+                    ("NP_GG_Gain_MC", "V"),     # NP Avg GG Gain - MC
+                    ("NP_GG_Gain_MA", "W"),     # NP Avg GG Gain - MA
+                    ("NP_GG_Gain_Overall", "X") # NP Avg GG Gain - Overall
+                ])
             
             # Read Raw_Data tab
             logger.info(f"Reading data from {raw_data_tab} tab")
@@ -775,27 +804,39 @@ class GoogleSheetsService:
                     source_col_indices[source_col] = idx
                     logger.info(f"Found source column '{source_col}' at index {idx}")
                 except ValueError:
-                    logger.warning(f"Source column '{source_col}' not found in Raw_Data headers")
-                    return False
+                    # NP_ columns may not exist when comparison mode is off or data is missing
+                    if source_col.startswith("NP_"):
+                        logger.warning(f"NP_ source column '{source_col}' not found in Raw_Data headers (will use empty)")
+                    else:
+                        logger.warning(f"Source column '{source_col}' not found in Raw_Data headers")
+                        return False
             
-            # Clear A2:P100 in Facility_Data tab (preserve header row 1, clear all old data)
-            # This ensures ALL previous data is removed before writing new data
-            logger.info(f"Clearing data range A2:P100 in {facility_data_tab} tab (preserving header and graphs)")
+            # Determine the last column letter based on comparison mode
+            last_col = "X" if comparison_mode else "P"
+
+            # Clear data range in Facility_Data tab (preserve header row 1, clear all old data)
+            logger.info(f"Clearing data range A2:{last_col}100 in {facility_data_tab} tab (preserving header and graphs)")
             self.sheets_service.values().clear(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!A2:P100"
+                range=f"{facility_data_tab}!A2:{last_col}100"
             ).execute()
             logger.info(f"Successfully cleared old data from {facility_data_tab} tab")
-            
+
             # Write headers in row 1 if needed (or update them)
             headers = ["Facilities", "Managed Care Average LOS", "Medicare A Average LOS",
                       "Section GG Improv", "5 Day Mean", "End of PPS Mean",
                       "Avg GG Gain - MC", "Avg GG Gain - MA", "Avg GG Gain - Overall",
                       "Total Injections", "Inj 20600", "Inj 20604",
                       "Inj 20605", "Inj 20606", "Inj 20610", "Inj 20611"]
+            if comparison_mode:
+                headers.extend([
+                    "NP MC Avg LOS", "NP MA Avg LOS",
+                    "NP 5 Day Mean", "NP End of PPS Mean", "NP Section GG Improv",
+                    "NP Avg GG Gain - MC", "NP Avg GG Gain - MA", "NP Avg GG Gain - Overall"
+                ])
             self.sheets_service.values().update(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!A1:P1",
+                range=f"{facility_data_tab}!A1:{last_col}1",
                 valueInputOption='USER_ENTERED',
                 body={'values': [headers]}
             ).execute()
@@ -820,9 +861,9 @@ class GoogleSheetsService:
                 row_data = [short_name]
                 
                 for source_col, dest_col in column_mapping:
-                    source_idx = source_col_indices[source_col]
+                    source_idx = source_col_indices.get(source_col)
                     value = ""
-                    if len(row) > source_idx:
+                    if source_idx is not None and len(row) > source_idx:
                         value = row[source_idx]
                         # Convert to number if possible for averaging
                         try:
@@ -851,7 +892,7 @@ class GoogleSheetsService:
                 
                 self.sheets_service.values().update(
                     spreadsheetId=test_sheet_id,
-                    range=f"{facility_data_tab}!A{start_row}:P{end_row}",
+                    range=f"{facility_data_tab}!A{start_row}:{last_col}{end_row}",
                     valueInputOption='USER_ENTERED',
                     body={'values': batch}
                 ).execute()
@@ -869,7 +910,7 @@ class GoogleSheetsService:
                 body={'values': [["Network Average"]]}
             ).execute()
             
-            # Calculate and write averages for columns B-P
+            # Calculate and write averages for columns B onward
             avg_row_data = ["Network Average"]
             for source_col, dest_col in column_mapping:
                 if dest_col in numeric_values and numeric_values[dest_col]:
@@ -878,11 +919,11 @@ class GoogleSheetsService:
                     logger.info(f"Network Average for '{dest_col}': {avg_value:.2f}")
                 else:
                     avg_row_data.append("")
-            
-            # Write averages to columns B-P
+
+            # Write averages to columns B onward
             self.sheets_service.values().update(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!B{network_avg_row}:P{network_avg_row}",
+                range=f"{facility_data_tab}!B{network_avg_row}:{last_col}{network_avg_row}",
                 valueInputOption='USER_ENTERED',
                 body={'values': [avg_row_data[1:]]}  # Skip first element (label)
             ).execute()
@@ -1363,7 +1404,8 @@ class GoogleSheetsService:
 
         return result
 
-    def fetch_facility_metrics_from_file(self, facility_names: list, file_path: str, los_csv_dir: str = None) -> dict:
+    def fetch_facility_metrics_from_file(self, facility_names: list, file_path: str, los_csv_dir: str = None,
+                                         comparison_mode: bool = False, puzzle_patient_names_file: str = None) -> dict:
         """
         Fetch GS, PPS, and INC values from an uploaded Excel/CSV file for given facilities.
         The file should have multiple sheets/tabs, one for each facility.
@@ -1531,6 +1573,73 @@ class GoogleSheetsService:
                         logger.info(f"Calculated metrics for '{facility_name}' (sheet: {tab_name}): "
                                   f"GS={gs:.2f}, PPS={pps:.2f}, INC={inc:.2f} "
                                   f"(from {len(complete_rows_y)} complete rows)")
+
+                        # --- Comparison mode: split GG into Puzzle vs Non-Puzzle ---
+                        if comparison_mode and complete_row_details:
+                            puzzle_names_set = set()
+                            if puzzle_patient_names_file:
+                                try:
+                                    import json as _json
+                                    with open(puzzle_patient_names_file, 'r', encoding='utf-8') as _f:
+                                        all_puzzle_names = _json.load(_f)
+                                    # Find matching facility key
+                                    fac_names_list = all_puzzle_names.get(facility_name, [])
+                                    if not fac_names_list:
+                                        # Try partial matching
+                                        for key, val in all_puzzle_names.items():
+                                            if key.lower() in facility_name.lower() or facility_name.lower() in key.lower():
+                                                fac_names_list = val
+                                                break
+                                    for entry in fac_names_list:
+                                        fn = entry.get("first_name", "").strip().lower()
+                                        ln = entry.get("last_name", "").strip().lower()
+                                        if fn or ln:
+                                            puzzle_names_set.add((fn, ln))
+                                    logger.info(f"Loaded {len(puzzle_names_set)} puzzle patient names for '{facility_name}'")
+                                except Exception as e:
+                                    logger.warning(f"Could not load puzzle patient names: {e}")
+
+                            # Split complete_row_details into puzzle vs non-puzzle
+                            np_rows = []
+                            for row_detail in complete_row_details:
+                                fn = row_detail["first_name"].strip().lower()
+                                ln = row_detail["last_name"].strip().lower()
+                                if (fn, ln) not in puzzle_names_set:
+                                    np_rows.append(row_detail)
+
+                            logger.info(f"GG split for '{facility_name}': {len(complete_row_details) - len(np_rows)} Puzzle, {len(np_rows)} Non-Puzzle")
+
+                            # Calculate NP_ GG metrics
+                            if np_rows:
+                                np_gs_vals = [r["gs"] for r in np_rows]
+                                np_pps_vals = [r["pps"] for r in np_rows]
+                                np_gs = sum(np_gs_vals) / len(np_gs_vals)
+                                np_pps = sum(np_pps_vals) / len(np_pps_vals)
+                                np_inc = np_pps - np_gs
+                                results[facility_name]["NP_GS"] = round(np_gs, 2)
+                                results[facility_name]["NP_PPS"] = round(np_pps, 2)
+                                results[facility_name]["NP_INC"] = round(np_inc, 2)
+
+                                # Calculate NP_ payer-level gains
+                                if los_csv_dir:
+                                    np_payer_gains = self._calculate_payer_gg_gains(
+                                        facility_name, np_rows, los_csv_dir
+                                    )
+                                    results[facility_name]["NP_GG_Gain_MC"] = np_payer_gains.get("GG_Gain_MC", 0)
+                                    results[facility_name]["NP_GG_Gain_MA"] = np_payer_gains.get("GG_Gain_MA", 0)
+                                    results[facility_name]["NP_GG_Gain_Overall"] = np_payer_gains.get("GG_Gain_Overall", 0)
+                                else:
+                                    results[facility_name]["NP_GG_Gain_MC"] = 0
+                                    results[facility_name]["NP_GG_Gain_MA"] = 0
+                                    np_gains = [r["gain"] for r in np_rows]
+                                    results[facility_name]["NP_GG_Gain_Overall"] = round(sum(np_gains) / len(np_gains), 2) if np_gains else 0
+                            else:
+                                results[facility_name]["NP_GS"] = 0
+                                results[facility_name]["NP_PPS"] = 0
+                                results[facility_name]["NP_INC"] = 0
+                                results[facility_name]["NP_GG_Gain_MC"] = 0
+                                results[facility_name]["NP_GG_Gain_MA"] = 0
+                                results[facility_name]["NP_GG_Gain_Overall"] = 0
                     else:
                         logger.warning(f"Insufficient complete rows for '{facility_name}' (sheet: {tab_name}): "
                                      f"Y values: {len(complete_rows_y)}, AN values: {len(complete_rows_an)}")

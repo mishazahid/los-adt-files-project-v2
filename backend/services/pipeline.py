@@ -79,6 +79,11 @@ class PipelineService:
             "errors": []
         }
         
+        # Check if comparison mode is enabled for this job
+        comparison_mode = job_status.get(job_id, {}).get("comparison_mode", False)
+        if comparison_mode:
+            await self._log(log_file, f"[{datetime.now()}] Comparison mode ENABLED (Puzzle vs Non-Puzzle)")
+
         try:
             # Step 1 & 2: Process ADT and LOS files in parallel
             adt_output_dir = Path("outputs") / job_id / "ADT-csv"
@@ -140,15 +145,19 @@ class PipelineService:
             await self._normalize_filenames(adt_output_dir, log_file)
             await self._normalize_filenames(los_output_dir, log_file)
             
+            combiner_args = [
+                "--folders",
+                str(adt_output_dir),
+                str(los_output_dir),
+                str(visits_dir),
+                str(combined_dir)
+            ]
+            if comparison_mode:
+                combiner_args.append("--comparison-mode")
+
             await self._run_script(
                 self.combiner_script,
-                [
-                    "--folders",
-                    str(adt_output_dir),
-                    str(los_output_dir),
-                    str(visits_dir),
-                    str(combined_dir)
-                ],
+                combiner_args,
                 log_file
             )
             results["outputs"]["combined"] = str(combined_dir)
@@ -221,13 +230,25 @@ class PipelineService:
                         await self._log(log_file, f"[{datetime.now()}] Google Sheet source - ID: {user_sheet_id}, File: {google_sheet_file}")
                         
                         # Fetch metrics from Google Sheet or uploaded file
+                        # Determine puzzle_patient_names_file path for comparison mode
+                        puzzle_patient_names_file = None
+                        if comparison_mode:
+                            ppn_path = combined_dir / "puzzle_patient_names.json"
+                            if ppn_path.exists():
+                                puzzle_patient_names_file = str(ppn_path)
+                                await self._log(log_file, f"[{datetime.now()}] Found puzzle_patient_names.json: {puzzle_patient_names_file}")
+                            else:
+                                await self._log(log_file, f"[{datetime.now()}] [WARNING] puzzle_patient_names.json not found at {ppn_path}")
+
                         if google_sheet_file:
                             # Read from uploaded file
                             await self._log(log_file, f"[{datetime.now()}] Reading metrics from uploaded file: {google_sheet_file}")
                             auto_metrics = self.sheets_service.fetch_facility_metrics_from_file(
                                 facility_names,
                                 file_path=google_sheet_file,
-                                los_csv_dir=str(los_output_dir)
+                                los_csv_dir=str(los_output_dir),
+                                comparison_mode=comparison_mode,
+                                puzzle_patient_names_file=puzzle_patient_names_file
                             )
                         elif user_sheet_id:
                             # Fetch from Google Sheet using provided ID
@@ -245,6 +266,11 @@ class PipelineService:
                                 facility_values[facility_name] = auto_metrics[facility_name]
                                 metrics = auto_metrics[facility_name]
                                 await self._log(log_file, f"[{datetime.now()}] Auto-fetched for {facility_name}: GS={metrics.get('GS', 'N/A')}, PPS={metrics.get('PPS', 'N/A')}, INC={metrics.get('INC', 'N/A')}, GG_Gain_MC={metrics.get('GG_Gain_MC', 'N/A')}, GG_Gain_MA={metrics.get('GG_Gain_MA', 'N/A')}, GG_Gain_Overall={metrics.get('GG_Gain_Overall', 'N/A')}")
+                                if comparison_mode:
+                                    np_keys = [k for k in metrics.keys() if k.startswith('NP_')]
+                                    if np_keys:
+                                        np_info = ", ".join(f"{k}={metrics[k]}" for k in np_keys)
+                                        await self._log(log_file, f"[{datetime.now()}]   NP_ metrics for {facility_name}: {np_info}")
                             else:
                                 await self._log(log_file, f"[{datetime.now()}] [WARNING] Could not fetch metrics for {facility_name}")
                         
@@ -279,7 +305,7 @@ class PipelineService:
                 
                 # Step 5.4: Copy data from Raw_Data to Facility_Data tab
                 await self._log(log_file, f"[{datetime.now()}] Step 5.4: Copying data from Raw_Data to Facility_Data tab...")
-                copy_success = await self.sheets_service.copy_raw_data_to_facility_data()
+                copy_success = await self.sheets_service.copy_raw_data_to_facility_data(comparison_mode=comparison_mode)
                 if copy_success:
                     await self._log(log_file, f"[{datetime.now()}] [OK] Data copied to Facility_Data tab")
                     results["steps_completed"].append("facility_data_update")

@@ -23,7 +23,8 @@ async def upload_files(
     visit_files: List[UploadFile] = File(default=[]),
     facility_values: Optional[str] = Form(None),
     google_sheet_link: Optional[str] = Form(None),
-    google_sheet_file: Optional[UploadFile] = File(None)
+    google_sheet_file: Optional[UploadFile] = File(None),
+    comparison_mode: Optional[str] = Form(None)
 ):
     """
     Upload files for processing
@@ -112,6 +113,10 @@ async def upload_files(
         # Store facility values in job status
         if facility_values_dict:
             job_status[job_id]["facility_values"] = facility_values_dict
+
+        # Store comparison mode flag
+        if comparison_mode and comparison_mode.lower() == 'true':
+            job_status[job_id]["comparison_mode"] = True
         
         # Handle Google Sheet link or file
         google_sheet_id = None

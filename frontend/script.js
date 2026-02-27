@@ -287,6 +287,12 @@ async function handleUpload() {
         console.log('No Google Sheet file provided');
     }
 
+    // Add comparison mode flag
+    const comparisonCheckbox = document.getElementById('comparisonMode');
+    if (comparisonCheckbox && comparisonCheckbox.checked) {
+        formData.append('comparison_mode', 'true');
+    }
+
     // Show processing section
     processingSection.style.display = 'block';
     resultsSection.style.display = 'none';

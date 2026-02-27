@@ -494,10 +494,143 @@ def calculate_injection_metrics(visit_df, facility_name):
     return results
 
 
+def _calculate_summary_metrics(df):
+    """
+    Calculate summary metrics from a patient DataFrame.
+    Returns a dict with all computed metric values.
+    """
+    patients_served = len(df)
+    total_visits = df['Number of Visits by Puzzle Provider'].sum() if 'Number of Visits by Puzzle Provider' in df.columns else 0
+    avg_visits_per_patient = total_visits / patients_served if patients_served > 0 else 0
+
+    # LOS metrics
+    los_avg = df['LOS'].mean() if 'LOS' in df.columns and patients_served > 0 else 0
+    los_managed_avg = 0
+    los_medicare_avg = 0
+    managed_care_count = 0
+    medicare_a_count = 0
+
+    if 'LOS' in df.columns and 'Payer Type' in df.columns:
+        managed_care_data = df[df['Payer Type'] == 'Managed Care']['LOS']
+        medicare_data = df[df['Payer Type'] == 'Medicare A']['LOS']
+        los_managed_avg = managed_care_data.mean() if len(managed_care_data) > 0 else 0
+        los_medicare_avg = medicare_data.mean() if len(medicare_data) > 0 else 0
+        managed_care_count = len(df[df['Payer Type'] == 'Managed Care'])
+        medicare_a_count = len(df[df['Payer Type'] == 'Medicare A'])
+
+    # Discharge mapping
+    discharge_mapping = []
+    if 'to_type' in df.columns:
+        for to_type in df['to_type'].fillna('Custodial'):
+            to_type_str = str(to_type).strip().lower()
+            if to_type_str == '':
+                discharge_mapping.append('Custodial')
+            elif 'custodial' in to_type_str:
+                discharge_mapping.append('Custodial')
+            elif 'hospital' in to_type_str:
+                discharge_mapping.append('Hospital Transfer')
+            elif 'funeral' in to_type_str:
+                discharge_mapping.append('Expired')
+            elif ('board and care/assisted living/group home' in to_type_str or
+                  'board and care' in to_type_str or
+                  'assisted living' in to_type_str or
+                  ('assisted' in to_type_str and 'living' not in to_type_str) or
+                  'group home' in to_type_str):
+                discharge_mapping.append('Assisted Living')
+            elif 'home' in to_type_str and 'no' in to_type_str and 'funeral' not in to_type_str:
+                discharge_mapping.append('Home Discharge No')
+            elif 'home' in to_type_str and 'funeral' not in to_type_str:
+                discharge_mapping.append('Home Discharge')
+            elif 'other' in to_type_str or 'unknown' in to_type_str:
+                discharge_mapping.append('Other')
+            else:
+                discharge_mapping.append('Other')
+    else:
+        discharge_mapping = ['Custodial'] * len(df)
+
+    total_home_discharge = discharge_mapping.count('Home Discharge')
+    total_home_discharge_no = discharge_mapping.count('Home Discharge No')
+    total_hospital_transfer = discharge_mapping.count('Hospital Transfer')
+    total_expired = discharge_mapping.count('Expired')
+    total_custodial = discharge_mapping.count('Custodial')
+    total_assisted_living = discharge_mapping.count('Assisted Living')
+    total_other = discharge_mapping.count('Other')
+
+    hd_ratio = f"{total_home_discharge}:{patients_served}" if patients_served > 0 else "0:0"
+    hdn_ratio = f"{total_home_discharge_no}:{patients_served}" if patients_served > 0 else "0:0"
+    ht_ratio = f"{total_hospital_transfer}:{patients_served}" if patients_served > 0 else "0:0"
+    ex_ratio = f"{total_expired}:{patients_served}" if patients_served > 0 else "0:0"
+    cus_ratio = f"{total_custodial}:{patients_served}" if patients_served > 0 else "0:0"
+    al_ratio = f"{total_assisted_living}:{patients_served}" if patients_served > 0 else "0:0"
+    ot_ratio = f"{total_other}:{patients_served}" if patients_served > 0 else "0:0"
+    snf_ratio = "0:0"
+
+    pct_home_discharge = (total_home_discharge / patients_served * 100) if patients_served > 0 else 0
+    pct_home_discharge_no = (total_home_discharge_no / patients_served * 100) if patients_served > 0 else 0
+    pct_hospital_transfer = (total_hospital_transfer / patients_served * 100) if patients_served > 0 else 0
+    pct_expired = (total_expired / patients_served * 100) if patients_served > 0 else 0
+    pct_custodial = (total_custodial / patients_served * 100) if patients_served > 0 else 0
+    pct_assisted_living = (total_assisted_living / patients_served * 100) if patients_served > 0 else 0
+    pct_other = (total_other / patients_served * 100) if patients_served > 0 else 0
+    pct_snf = 0
+
+    return {
+        'patients_served': patients_served,
+        'total_visits': total_visits,
+        'avg_visits_per_patient': round(avg_visits_per_patient, 2),
+        'los_avg': round(los_avg, 2),
+        'los_managed_avg': round(los_managed_avg, 2),
+        'los_medicare_avg': round(los_medicare_avg, 2),
+        'managed_care_count': managed_care_count,
+        'medicare_a_count': medicare_a_count,
+        'hd_ratio': hd_ratio, 'hdn_ratio': hdn_ratio, 'ht_ratio': ht_ratio,
+        'ex_ratio': ex_ratio, 'cus_ratio': cus_ratio, 'al_ratio': al_ratio,
+        'ot_ratio': ot_ratio, 'snf_ratio': snf_ratio,
+        'pct_home_discharge': round(pct_home_discharge, 2),
+        'pct_home_discharge_no': round(pct_home_discharge_no, 2),
+        'pct_hospital_transfer': round(pct_hospital_transfer, 2),
+        'pct_expired': round(pct_expired, 2),
+        'pct_custodial': round(pct_custodial, 2),
+        'pct_assisted_living': round(pct_assisted_living, 2),
+        'pct_other': round(pct_other, 2),
+        'pct_snf': round(pct_snf, 2),
+    }
+
+
+def _build_summarized_columns(metrics, prefix=""):
+    """
+    Build the column dict for summarized data from metrics.
+    If prefix is provided (e.g. 'NP_'), column names get that prefix.
+    """
+    p = prefix
+    return {
+        f'{p}Patients Served': [metrics['patients_served']],
+        f'{p}LOS Overall Avg': [metrics['los_avg']],
+        f'{p}LOS Man Avg': [metrics['los_managed_avg']],
+        f'{p}LOS Med Avg': [metrics['los_medicare_avg']],
+        f'{p}Managed Care Count': [metrics['managed_care_count']],
+        f'{p}Medicare A Count': [metrics['medicare_a_count']],
+        f'{p}Managed Care Ratio': [f"{metrics['managed_care_count']}:{metrics['patients_served']}"],
+        f'{p}Medicare A Ratio': [f"{metrics['medicare_a_count']}:{metrics['patients_served']}"],
+        f'{p}HD': [metrics['hd_ratio']], f'{p}HDN': [metrics['hdn_ratio']],
+        f'{p}HT': [metrics['ht_ratio']], f'{p}Ex': [metrics['ex_ratio']],
+        f'{p}Cus': [metrics['cus_ratio']], f'{p}AL': [metrics['al_ratio']],
+        f'{p}OT': [metrics['ot_ratio']], f'{p}SNF': [metrics['snf_ratio']],
+        f'{p}%HD': [metrics['pct_home_discharge']],
+        f'{p}%HDN': [metrics['pct_home_discharge_no']],
+        f'{p}%HT': [metrics['pct_hospital_transfer']],
+        f'{p}%Ex': [metrics['pct_expired']],
+        f'{p}%Cus': [metrics['pct_custodial']],
+        f'{p}%AL': [metrics['pct_assisted_living']],
+        f'{p}%OT': [metrics['pct_other']],
+        f'{p}%SNF': [metrics['pct_snf']],
+    }
+
+
 def export_summarized_data(df, output_path, facility_name, ltc_gross_encounters=0, ltc_unique_patients=0, injection_metrics=None):
     """Export summarized data CSV with key metrics."""
     print(f"\n--- Exporting Summarized Data ---")
-    
+
     try:
         inj = injection_metrics if injection_metrics is not None else {}
 
@@ -505,174 +638,56 @@ def export_summarized_data(df, output_path, facility_name, ltc_gross_encounters=
         output_dir = Path(output_path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Calculate basic metrics
-        patients_served = len(df)
-        total_visits = df['Number of Visits by Puzzle Provider'].sum() if 'Number of Visits by Puzzle Provider' in df.columns else 0
-        avg_visits_per_patient = total_visits / patients_served if patients_served > 0 else 0
-        
-        # Calculate LOS metrics
-        los_avg = df['LOS'].mean() if 'LOS' in df.columns else 0
-        
-        # Calculate LOS by payer type
-        los_managed_avg = 0
-        los_medicare_avg = 0
-        managed_care_count = 0
-        medicare_a_count = 0
-        
-        if 'LOS' in df.columns and 'Payer Type' in df.columns:
-            managed_care_data = df[df['Payer Type'] == 'Managed Care']['LOS']
-            medicare_data = df[df['Payer Type'] == 'Medicare A']['LOS']
-            
-            los_managed_avg = managed_care_data.mean() if len(managed_care_data) > 0 else 0
-            los_medicare_avg = medicare_data.mean() if len(medicare_data) > 0 else 0
-            
-            # Count unique patients per payer type
-            managed_care_count = len(df[df['Payer Type'] == 'Managed Care'])
-            medicare_a_count = len(df[df['Payer Type'] == 'Medicare A'])
-        
-        # Create discharge mapping (case-insensitive)
-        # Note: This mapping is used ONLY for counting/categorization purposes.
-        # The actual to_type values in the dataframe are NOT modified.
-        # "Unknown" values remain as "Unknown" in the data but are counted in OT.
-        discharge_mapping = []
-        if 'to_type' in df.columns:
-            for to_type in df['to_type'].fillna('Custodial'):
-                # Convert to string, strip whitespace, and make lowercase for case-insensitive matching
-                to_type_str = str(to_type).strip().lower()
-                
-                # Check for blank/empty values (should already be 'Custodial' but handle just in case)
-                if to_type_str == '':
-                    discharge_mapping.append('Custodial')
-                # Check for Custodial (case-insensitive)
-                elif 'custodial' in to_type_str:
-                    discharge_mapping.append('Custodial')
-                # Check for Hospital Transfer (case-insensitive)
-                elif 'hospital' in to_type_str:
-                    discharge_mapping.append('Hospital Transfer')
-                # Check for Expired/Funeral (case-insensitive)
-                elif 'funeral' in to_type_str:
-                    discharge_mapping.append('Expired')
-                # Check for Assisted Living (must check before Home Discharge to avoid double counting)
-                # Check for full phrase first, then individual components
-                elif ('board and care/assisted living/group home' in to_type_str or
-                      'board and care' in to_type_str or
-                      'assisted living' in to_type_str or
-                      ('assisted' in to_type_str and 'living' not in to_type_str) or  # "assisted" but not "assisted living"
-                      'group home' in to_type_str):
-                    discharge_mapping.append('Assisted Living')
-                # Check for Home Discharge with 'no' (HDN) - must check before regular Home Discharge
-                elif 'home' in to_type_str and 'no' in to_type_str and 'funeral' not in to_type_str:
-                    discharge_mapping.append('Home Discharge No')
-                # Check for Home Discharge (case-insensitive, but exclude funeral home and 'no')
-                elif 'home' in to_type_str and 'funeral' not in to_type_str:
-                    discharge_mapping.append('Home Discharge')
-                # Check for Other or Unknown (case-insensitive)
-                # Note: "Unknown" values are counted as "Other" for OT calculations but remain unchanged in the data
-                elif 'other' in to_type_str or 'unknown' in to_type_str:
-                    discharge_mapping.append('Other')
-                else:
-                    discharge_mapping.append('Other')
-        else:
-            discharge_mapping = ['Custodial'] * len(df)
-        
-        # Calculate discharge counts and ratios
-        total_home_discharge = discharge_mapping.count('Home Discharge')
-        total_home_discharge_no = discharge_mapping.count('Home Discharge No')
-        total_hospital_transfer = discharge_mapping.count('Hospital Transfer')
-        total_expired = discharge_mapping.count('Expired')
-        total_custodial = discharge_mapping.count('Custodial')
-        total_assisted_living = discharge_mapping.count('Assisted Living')
-        total_other = discharge_mapping.count('Other')
-        
-        # Create ratio format KPIs (always show count:total_patients)
-        hd_ratio = f"{total_home_discharge}:{patients_served}" if patients_served > 0 else "0:0"
-        hdn_ratio = f"{total_home_discharge_no}:{patients_served}" if patients_served > 0 else "0:0"
-        ht_ratio = f"{total_hospital_transfer}:{patients_served}" if patients_served > 0 else "0:0"
-        ex_ratio = f"{total_expired}:{patients_served}" if patients_served > 0 else "0:0"
-        cus_ratio = f"{total_custodial}:{patients_served}" if patients_served > 0 else "0:0"
-        al_ratio = f"{total_assisted_living}:{patients_served}" if patients_served > 0 else "0:0"
-        ot_ratio = f"{total_other}:{patients_served}" if patients_served > 0 else "0:0"
-        snf_ratio = "0:0"
-        
-        pct_home_discharge = (total_home_discharge / patients_served * 100) if patients_served > 0 else 0
-        pct_home_discharge_no = (total_home_discharge_no / patients_served * 100) if patients_served > 0 else 0
-        pct_hospital_transfer = (total_hospital_transfer / patients_served * 100) if patients_served > 0 else 0
-        pct_expired = (total_expired / patients_served * 100) if patients_served > 0 else 0
-        pct_custodial = (total_custodial / patients_served * 100) if patients_served > 0 else 0
-        pct_assisted_living = (total_assisted_living / patients_served * 100) if patients_served > 0 else 0
-        pct_other = (total_other / patients_served * 100) if patients_served > 0 else 0
-        pct_snf = 0
-        
-        # Create summarized data
-        summarized_data = {
-            'Facility': [facility_name],
-            'Patients Served': [patients_served],
-            'Total Visits': [total_visits],
-            'Avg Visits per Patient': [round(avg_visits_per_patient, 2)],
-            'LOS Overall Avg': [round(los_avg, 2)],
-            'LOS Man Avg': [round(los_managed_avg, 2)],
-            'LOS Med Avg': [round(los_medicare_avg, 2)],
-            'Managed Care Count': [managed_care_count],
-            'Medicare A Count': [medicare_a_count],
-            'Managed Care Ratio': [f"{managed_care_count}:{patients_served}"],
-            'Medicare A Ratio': [f"{medicare_a_count}:{patients_served}"],
-            'HD': [hd_ratio],
-            'HDN': [hdn_ratio],
-            'HT': [ht_ratio],
-            'Ex': [ex_ratio],
-            'Cus': [cus_ratio],
-            'AL': [al_ratio],
-            'OT': [ot_ratio],
-            'SNF': [snf_ratio],
-            '%HD': [round(pct_home_discharge, 2)],
-            '%HDN': [round(pct_home_discharge_no, 2)],
-            '%HT': [round(pct_hospital_transfer, 2)],
-            '%Ex': [round(pct_expired, 2)],
-            '%Cus': [round(pct_custodial, 2)],
-            '%AL': [round(pct_assisted_living, 2)],
-            '%OT': [round(pct_other, 2)],
-            '%SNF': [round(pct_snf, 2)],
-            'Total Gross LTC Encounters': [ltc_gross_encounters],
-            'Patients Served (LTC)': [ltc_unique_patients],
-            'Inj_Total': [inj.get('total', 0)],
-            'Inj_20600': [inj.get('20600', 0)],
-            'Inj_20604': [inj.get('20604', 0)],
-            'Inj_20605': [inj.get('20605', 0)],
-            'Inj_20606': [inj.get('20606', 0)],
-            'Inj_20610': [inj.get('20610', 0)],
-            'Inj_20611': [inj.get('20611', 0)]
-        }
-        
+        metrics = _calculate_summary_metrics(df)
+
+        # Create summarized data using helper
+        summarized_data = {'Facility': [facility_name]}
+        # Add Puzzle-specific visit columns
+        summarized_data['Total Visits'] = [metrics['total_visits']]
+        summarized_data['Avg Visits per Patient'] = [metrics['avg_visits_per_patient']]
+        # Add all standard columns
+        summarized_data.update(_build_summarized_columns(metrics))
+        # Add LTC and injection columns
+        summarized_data['Total Gross LTC Encounters'] = [ltc_gross_encounters]
+        summarized_data['Patients Served (LTC)'] = [ltc_unique_patients]
+        summarized_data['Inj_Total'] = [inj.get('total', 0)]
+        summarized_data['Inj_20600'] = [inj.get('20600', 0)]
+        summarized_data['Inj_20604'] = [inj.get('20604', 0)]
+        summarized_data['Inj_20605'] = [inj.get('20605', 0)]
+        summarized_data['Inj_20606'] = [inj.get('20606', 0)]
+        summarized_data['Inj_20610'] = [inj.get('20610', 0)]
+        summarized_data['Inj_20611'] = [inj.get('20611', 0)]
+
         summarized_df = pd.DataFrame(summarized_data)
-        
+
         # Save to CSV
         summarized_df.to_csv(output_path, index=False, encoding='utf-8')
-        
+
         print(f"[OK] Summarized data saved to: {output_path}")
         print(f"  Summary metrics:")
         print(f"    Facility: {facility_name}")
-        print(f"    Patients Served: {patients_served}")
-        print(f"    Total Visits: {total_visits}")
-        print(f"    Avg Visits per Patient: {avg_visits_per_patient:.2f}")
-        print(f"    LOS Overall Avg: {los_avg:.2f}")
-        print(f"    LOS Man Avg: {los_managed_avg:.2f}")
-        print(f"    LOS Med Avg: {los_medicare_avg:.2f}")
-        print(f"    HD: {hd_ratio}")
-        print(f"    HDN: {hdn_ratio}")
-        print(f"    HT: {ht_ratio}")
-        print(f"    Ex: {ex_ratio}")
-        print(f"    Cus: {cus_ratio}")
-        print(f"    AL: {al_ratio}")
-        print(f"    OT: {ot_ratio}")
-        print(f"    SNF: {snf_ratio}")
-        print(f"    %HD: {pct_home_discharge:.2f}%")
-        print(f"    %HDN: {pct_home_discharge_no:.2f}%")
-        print(f"    %HT: {pct_hospital_transfer:.2f}%")
-        print(f"    %Ex: {pct_expired:.2f}%")
-        print(f"    %Cus: {pct_custodial:.2f}%")
-        print(f"    %AL: {pct_assisted_living:.2f}%")
-        print(f"    %OT: {pct_other:.2f}%")
-        print(f"    %SNF: {pct_snf:.2f}%")
+        print(f"    Patients Served: {metrics['patients_served']}")
+        print(f"    Total Visits: {metrics['total_visits']}")
+        print(f"    Avg Visits per Patient: {metrics['avg_visits_per_patient']}")
+        print(f"    LOS Overall Avg: {metrics['los_avg']}")
+        print(f"    LOS Man Avg: {metrics['los_managed_avg']}")
+        print(f"    LOS Med Avg: {metrics['los_medicare_avg']}")
+        print(f"    HD: {metrics['hd_ratio']}")
+        print(f"    HDN: {metrics['hdn_ratio']}")
+        print(f"    HT: {metrics['ht_ratio']}")
+        print(f"    Ex: {metrics['ex_ratio']}")
+        print(f"    Cus: {metrics['cus_ratio']}")
+        print(f"    AL: {metrics['al_ratio']}")
+        print(f"    OT: {metrics['ot_ratio']}")
+        print(f"    SNF: {metrics['snf_ratio']}")
+        print(f"    %HD: {metrics['pct_home_discharge']}%")
+        print(f"    %HDN: {metrics['pct_home_discharge_no']}%")
+        print(f"    %HT: {metrics['pct_hospital_transfer']}%")
+        print(f"    %Ex: {metrics['pct_expired']}%")
+        print(f"    %Cus: {metrics['pct_custodial']}%")
+        print(f"    %AL: {metrics['pct_assisted_living']}%")
+        print(f"    %OT: {metrics['pct_other']}%")
+        print(f"    %SNF: {metrics['pct_snf']}%")
         print(f"    Total Gross LTC Encounters: {ltc_gross_encounters}")
         print(f"    Patients Served (LTC): {ltc_unique_patients}")
         print(f"    Inj Total: {inj.get('total', 0)}")
@@ -684,10 +699,99 @@ def export_summarized_data(df, output_path, facility_name, ltc_gross_encounters=
         print(f"    Inj 20611: {inj.get('20611', 0)}")
 
         return summarized_df
-        
+
     except Exception as e:
         print(f"[FAILED] Error exporting summarized data: {e}")
         sys.exit(1)
+
+
+def export_summarized_data_with_comparison(puzzle_df, non_puzzle_df, output_path, facility_name,
+                                           ltc_gross_encounters=0, ltc_unique_patients=0, injection_metrics=None):
+    """Export summarized data CSV with Puzzle and Non-Puzzle (NP_) columns side by side."""
+    print(f"\n--- Exporting Summarized Data (Comparison Mode) ---")
+
+    try:
+        inj = injection_metrics if injection_metrics is not None else {}
+
+        output_dir = Path(output_path).parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Calculate Puzzle metrics
+        puzzle_metrics = _calculate_summary_metrics(puzzle_df)
+        # Calculate Non-Puzzle metrics
+        np_metrics = _calculate_summary_metrics(non_puzzle_df)
+
+        # Build the row: Facility + Puzzle columns + NP_ columns
+        summarized_data = {'Facility': [facility_name]}
+        # Puzzle visit columns (Non-Puzzle have 0 by definition)
+        summarized_data['Total Visits'] = [puzzle_metrics['total_visits']]
+        summarized_data['Avg Visits per Patient'] = [puzzle_metrics['avg_visits_per_patient']]
+        # Puzzle standard columns (no prefix)
+        summarized_data.update(_build_summarized_columns(puzzle_metrics))
+        # LTC and injection (Puzzle-specific)
+        summarized_data['Total Gross LTC Encounters'] = [ltc_gross_encounters]
+        summarized_data['Patients Served (LTC)'] = [ltc_unique_patients]
+        summarized_data['Inj_Total'] = [inj.get('total', 0)]
+        summarized_data['Inj_20600'] = [inj.get('20600', 0)]
+        summarized_data['Inj_20604'] = [inj.get('20604', 0)]
+        summarized_data['Inj_20605'] = [inj.get('20605', 0)]
+        summarized_data['Inj_20606'] = [inj.get('20606', 0)]
+        summarized_data['Inj_20610'] = [inj.get('20610', 0)]
+        summarized_data['Inj_20611'] = [inj.get('20611', 0)]
+        # Non-Puzzle columns (NP_ prefix)
+        summarized_data.update(_build_summarized_columns(np_metrics, prefix="NP_"))
+
+        summarized_df = pd.DataFrame(summarized_data)
+        summarized_df.to_csv(output_path, index=False, encoding='utf-8')
+
+        print(f"[OK] Comparison summarized data saved to: {output_path}")
+        print(f"  Puzzle Patients Served: {puzzle_metrics['patients_served']}")
+        print(f"  Non-Puzzle Patients Served: {np_metrics['patients_served']}")
+
+        return summarized_df
+
+    except Exception as e:
+        print(f"[FAILED] Error exporting comparison summarized data: {e}")
+        sys.exit(1)
+
+
+def _output_puzzle_patient_names(puzzle_df, output_dir, facility_name):
+    """
+    Save puzzle patient names to a JSON file for use by google_sheets.py
+    to split GG gains into Puzzle vs Non-Puzzle.
+    """
+    import json
+
+    names = []
+    first_cols = [c for c in puzzle_df.columns if 'first' in c.lower() and 'name' in c.lower()]
+    last_cols = [c for c in puzzle_df.columns if 'last' in c.lower() and 'name' in c.lower()]
+
+    if first_cols and last_cols:
+        fn_col = first_cols[0]
+        ln_col = last_cols[0]
+        for _, row in puzzle_df.iterrows():
+            fn = str(row[fn_col]).strip() if pd.notna(row[fn_col]) else ""
+            ln = str(row[ln_col]).strip() if pd.notna(row[ln_col]) else ""
+            if fn or ln:
+                names.append({"first_name": fn, "last_name": ln})
+
+    output_path = Path(output_dir) / "puzzle_patient_names.json"
+
+    # Load existing data if the file already exists (multiple facilities append)
+    existing = {}
+    if output_path.exists():
+        try:
+            with open(output_path, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            existing = {}
+
+    existing[facility_name] = names
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(existing, f, indent=2, ensure_ascii=False)
+
+    print(f"[OK] Puzzle patient names saved: {len(names)} patients for '{facility_name}' -> {output_path}")
 
 
 def save_output(df, output_path):
@@ -1073,8 +1177,8 @@ def find_matching_files(adt_folder: str, patient_folder: str, visit_folder: str)
     return matches
 
 
-def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str, output_folder: str, 
-                        facility_name: str = None) -> None:
+def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str, output_folder: str,
+                        facility_name: str = None, comparison_mode: bool = False) -> None:
     """
     Process folders containing CSV files and combine matching files based on facility names.
     
@@ -1126,7 +1230,7 @@ def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str
             current_facility_name = facility_name or facility_name_clean
             
             # Process this combination
-            process_file_combination(adt_file, patient_file, visit_file_or_folder, str(output_path), current_facility_name)
+            process_file_combination(adt_file, patient_file, visit_file_or_folder, str(output_path), current_facility_name, comparison_mode=comparison_mode)
             
             processed_count += 1
             
@@ -1141,64 +1245,92 @@ def process_folder_batch(adt_folder: str, patient_folder: str, visit_folder: str
     print(f"{'='*80}")
 
 
-def process_file_combination(adt_file: str, patient_file: str, visit_file_or_folder: str, 
-                           output_file: str, facility_name: str = None) -> None:
+def process_file_combination(adt_file: str, patient_file: str, visit_file_or_folder: str,
+                           output_file: str, facility_name: str = None, comparison_mode: bool = False) -> None:
     """
     Process a single combination of ADT, patient, and visit files.
-    
+
     Args:
         adt_file: Path to ADT cycles CSV file
         patient_file: Path to patient data CSV file
         visit_file_or_folder: Path to visit data CSV file or folder containing multiple visit files
         output_file: Path for the output CSV file
         facility_name: Optional facility name for summary data
+        comparison_mode: If True, produce side-by-side Puzzle vs Non-Puzzle metrics
     """
     # Load all input files
     adt_df = load_csv_file(adt_file, "ADT cycles")
     patient_df = load_csv_file(patient_file, "Patient data")
     visit_df = load_visit_files_from_folder(visit_file_or_folder, "Visit data")
-    
+
     # Process each dataset
     adt_df = process_adt_data(adt_df)
     patient_df = process_patient_data(patient_df)
     visit_counts = process_visit_data(visit_df)
-    
+
     # Merge all data
     final_df = merge_dataframes(adt_df, patient_df, visit_counts)
-    
-    # Filter to only include Puzzle Patients (Puzzle Patient = True)
-    print("\n--- Filtering Puzzle Patients ---")
-    initial_count = len(final_df)
-    final_df = final_df[final_df['Puzzle Patient'] == True].copy()
-    filtered_count = len(final_df)
-    excluded_count = initial_count - filtered_count
-    
-    print(f"[OK] Filtered data: {filtered_count} Puzzle Patients (excluded {excluded_count} non-Puzzle Patients)")
-    
-    if filtered_count == 0:
-        print("[WARNING] No Puzzle Patients found after filtering. Output files will be empty.")
-    
-    # Save output
-    save_output(final_df, output_file)
-    
-    # Export summarized data
+
+    # Determine facility name early (needed for both paths)
     if not facility_name:
-        # Extract facility name from patient file name
         facility_name_from_file = extract_facility_name_from_filename(patient_file, 'patient')
         facility_name = format_facility_name_for_display(facility_name_from_file)
-    
-    # Calculate LTC metrics from the charge capture data
-    ltc_gross, ltc_unique = calculate_ltc_metrics(visit_df, facility_name)
-    inj_metrics = calculate_injection_metrics(visit_df, facility_name)
 
-    # Create summarized data output path
     output_dir = Path(output_file).parent
-    summarized_filename = f"summarized_{Path(output_file).stem}.csv"
-    summarized_output_path = output_dir / summarized_filename
 
-    export_summarized_data(final_df, str(summarized_output_path), facility_name,
-                           ltc_gross_encounters=ltc_gross, ltc_unique_patients=ltc_unique,
-                           injection_metrics=inj_metrics)
+    if comparison_mode:
+        # --- Comparison mode: keep both Puzzle and Non-Puzzle subsets ---
+        print("\n--- Comparison Mode: Splitting Puzzle vs Non-Puzzle ---")
+        initial_count = len(final_df)
+        puzzle_df = final_df[final_df['Puzzle Patient'] == True].copy()
+        non_puzzle_df = final_df[final_df['Puzzle Patient'] == False].copy()
+        print(f"[OK] Split: {len(puzzle_df)} Puzzle, {len(non_puzzle_df)} Non-Puzzle (total {initial_count})")
+
+        # Save Puzzle combined CSV (existing behavior)
+        save_output(puzzle_df, output_file)
+
+        # Calculate LTC and injection metrics (Puzzle-specific)
+        ltc_gross, ltc_unique = calculate_ltc_metrics(visit_df, facility_name)
+        inj_metrics = calculate_injection_metrics(visit_df, facility_name)
+
+        # Export comparison summarized CSV
+        summarized_filename = f"summarized_{Path(output_file).stem}.csv"
+        summarized_output_path = output_dir / summarized_filename
+        export_summarized_data_with_comparison(
+            puzzle_df, non_puzzle_df, str(summarized_output_path), facility_name,
+            ltc_gross_encounters=ltc_gross, ltc_unique_patients=ltc_unique,
+            injection_metrics=inj_metrics
+        )
+
+        # Output puzzle patient names JSON for GG splitting
+        _output_puzzle_patient_names(puzzle_df, str(output_dir), facility_name)
+    else:
+        # --- Standard mode: Puzzle patients only ---
+        print("\n--- Filtering Puzzle Patients ---")
+        initial_count = len(final_df)
+        final_df = final_df[final_df['Puzzle Patient'] == True].copy()
+        filtered_count = len(final_df)
+        excluded_count = initial_count - filtered_count
+
+        print(f"[OK] Filtered data: {filtered_count} Puzzle Patients (excluded {excluded_count} non-Puzzle Patients)")
+
+        if filtered_count == 0:
+            print("[WARNING] No Puzzle Patients found after filtering. Output files will be empty.")
+
+        # Save output
+        save_output(final_df, output_file)
+
+        # Calculate LTC metrics from the charge capture data
+        ltc_gross, ltc_unique = calculate_ltc_metrics(visit_df, facility_name)
+        inj_metrics = calculate_injection_metrics(visit_df, facility_name)
+
+        # Create summarized data output path
+        summarized_filename = f"summarized_{Path(output_file).stem}.csv"
+        summarized_output_path = output_dir / summarized_filename
+
+        export_summarized_data(final_df, str(summarized_output_path), facility_name,
+                               ltc_gross_encounters=ltc_gross, ltc_unique_patients=ltc_unique,
+                               injection_metrics=inj_metrics)
 
 
 def main():
@@ -1233,7 +1365,9 @@ Examples:
                       help='Process folders of CSV files: ADT_FOLDER PATIENT_FOLDER VISIT_FOLDER OUTPUT_FOLDER. VISIT_FOLDER can contain multiple files that will be combined.')
     
     parser.add_argument('--facility-name', help='Name of the facility for summarized data (default: extracted from patient file name)')
-    
+    parser.add_argument('--comparison-mode', action='store_true', default=False,
+                        help='Enable comparison mode: produce side-by-side Puzzle vs Non-Puzzle metrics')
+
     args = parser.parse_args()
     
     # Check which mode to use
@@ -1251,7 +1385,8 @@ Examples:
         print("=" * 60)
         
         # Process folders
-        process_folder_batch(adt_folder, patient_folder, visit_folder, output_folder, args.facility_name)
+        process_folder_batch(adt_folder, patient_folder, visit_folder, output_folder, args.facility_name,
+                            comparison_mode=args.comparison_mode)
         
     else:
         # Individual file processing mode
@@ -1270,7 +1405,8 @@ Examples:
         print("=" * 60)
         
         # Process individual files
-        process_file_combination(args.adt_file, args.patient_file, args.visit_file, args.output_file, args.facility_name)
+        process_file_combination(args.adt_file, args.patient_file, args.visit_file, args.output_file, args.facility_name,
+                                comparison_mode=args.comparison_mode)
     
     print("\n" + "=" * 60)
     print("[OK] PROCESSING COMPLETE!")
