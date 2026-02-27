@@ -206,7 +206,6 @@ class PipelineService:
             master_summary_path = summary_dir / "master_summary.csv"
             if master_summary_path.exists():
                 # Get facility values from job status if available (for quarter)
-                from backend.config import job_status
                 manual_facility_values = job_status.get(job_id, {}).get("facility_values", {})
                 
                 # Auto-fetch GS, PPS, INC from Google Sheet
@@ -222,7 +221,6 @@ class PipelineService:
                     
                     if facility_names:
                         # Get Google Sheet ID or file from job status (user-provided or default)
-                        from backend.config import job_status
                         job_data = job_status.get(job_id, {})
                         user_sheet_id = job_data.get("google_sheet_id")
                         google_sheet_file = job_data.get("google_sheet_file")

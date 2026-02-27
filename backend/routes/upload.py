@@ -115,8 +115,10 @@ async def upload_files(
             job_status[job_id]["facility_values"] = facility_values_dict
 
         # Store comparison mode flag
+        logger.info(f"Received comparison_mode: {comparison_mode!r}")
         if comparison_mode and comparison_mode.lower() == 'true':
             job_status[job_id]["comparison_mode"] = True
+            logger.info(f"Comparison mode ENABLED for job {job_id}")
         
         # Handle Google Sheet link or file
         google_sheet_id = None
