@@ -205,6 +205,14 @@ class PipelineService:
             await self._log(log_file, f"[{datetime.now()}] Step 5: Updating Google Sheets...")
             master_summary_path = summary_dir / "master_summary.csv"
             if master_summary_path.exists():
+                # Step 5.0: Clear ALL tabs across both sheets to prevent stale data from previous runs
+                await self._log(log_file, f"[{datetime.now()}] Step 5.0: Clearing all sheet tabs from previous run...")
+                clear_success = await self.sheets_service.clear_all_sheets()
+                if clear_success:
+                    await self._log(log_file, f"[{datetime.now()}] [OK] All sheet tabs cleared")
+                else:
+                    await self._log(log_file, f"[{datetime.now()}] [WARNING] Some tabs could not be cleared (may not exist yet)")
+
                 # Get facility values from job status if available (for quarter)
                 manual_facility_values = job_status.get(job_id, {}).get("facility_values", {})
                 

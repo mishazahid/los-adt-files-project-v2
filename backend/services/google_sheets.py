@@ -129,7 +129,7 @@ class GoogleSheetsService:
 
     def _set_number_format(self, spreadsheet_id: str, tab_title: str, start_row: int = 2):
         """
-        Force columns B:AZ to plain number format to avoid time/date display.
+        Force columns B:DZ to plain number format to avoid time/date display.
         Applies from start_row to end of sheet.
         """
         sheet_id = self._get_sheet_id(spreadsheet_id, tab_title)
@@ -142,7 +142,7 @@ class GoogleSheetsService:
                         "sheetId": sheet_id,
                         "startRowIndex": start_row - 1,  # zero-based
                         "startColumnIndex": 1,  # column B
-                        "endColumnIndex": 52    # column AZ (exclusive)
+                        "endColumnIndex": 130   # column DZ (exclusive) - wide enough for comparison mode
                     },
                     "cell": {
                         "userEnteredFormat": {
@@ -159,7 +159,7 @@ class GoogleSheetsService:
                 spreadsheetId=spreadsheet_id,
                 body={"requests": requests}
             ).execute()
-            logger.info(f"Applied numeric format to {tab_title}!B:AZ")
+            logger.info(f"Applied numeric format to {tab_title}!B:DZ")
         except Exception as e:
             logger.warning(f"Failed to apply numeric format to {tab_title}: {e}")
     
@@ -225,6 +225,53 @@ class GoogleSheetsService:
             self.service = None
             self.sheets_service = None
     
+    async def clear_all_sheets(self) -> bool:
+        """
+        Clear data-only tabs across both Main and Test Fac sheets.
+        Should be called at the start of each pipeline run to prevent stale data.
+
+        Clears (pipeline-managed data tabs ONLY):
+          Main Sheet:  Summary (A1:DZ10000) — rewritten from CSV each run
+          Test Sheet:  Raw_Data (A1:DZ10000) — copy of Summary each run
+                       Facility_Data (A1:X100) — rebuilt from Raw_Data each run
+
+        Does NOT clear (contain formulas/manual setup):
+          Main Sheet:  Executive — has manually configured formulas
+          Test Sheet:  Summary — has formulas referenced by Apps Script
+
+        Returns:
+            bool: True if all clears succeeded, False if any failed
+        """
+        if not self.sheets_service:
+            logger.warning("Google Sheets service not available for clearing")
+            return False
+
+        test_sheet_id = "1FvZLxUS36JON-O8yY6zvrxxYyfOMHtHzmKAWUd5ytZk"
+        all_success = True
+
+        clear_targets = [
+            # (sheet_id, tab_name, range, description)
+            # Only clear tabs that are fully rewritten by the pipeline
+            (self.sheet_id, self.sheet_tab, "A1:DZ10000", "Main Sheet Summary"),
+            (test_sheet_id, "Raw_Data", "A1:DZ10000", "Test Sheet Raw_Data"),
+            (test_sheet_id, "Facility_Data", "A1:X100", "Test Sheet Facility_Data"),
+            # NOTE: Executive and Test Sheet Summary are NOT cleared — they contain formulas
+        ]
+
+        for sheet_id, tab, range_str, description in clear_targets:
+            try:
+                self.sheets_service.values().clear(
+                    spreadsheetId=sheet_id,
+                    range=f"{tab}!{range_str}"
+                ).execute()
+                logger.info(f"Cleared {description} ({tab}!{range_str})")
+            except Exception as e:
+                # Tab may not exist yet — that's OK
+                logger.warning(f"Could not clear {description} ({tab}!{range_str}): {e}")
+                all_success = False
+
+        return all_success
+
     async def update_sheets(self, csv_file: Path, facility_values: Optional[dict] = None) -> str:
         """
         Update Google Sheets with data from CSV file
@@ -270,8 +317,9 @@ class GoogleSheetsService:
 
             # Normalize values to numeric where possible to avoid time/text formatting
             # Use apply with map instead of deprecated applymap, and handle NaN values
-            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
-            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
+            # Skip ratio columns to preserve "count:total" format (including NP_ variants for comparison mode)
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio',
+                           'NP_HD', 'NP_HDN', 'NP_HT', 'NP_Ex', 'NP_Cus', 'NP_AL', 'NP_OT', 'NP_SNF', 'NP_Managed Care Ratio', 'NP_Medicare A Ratio']
             for col in df.columns:
                 if col not in ratio_columns:
                     df[col] = df[col].apply(lambda x: self._to_number(x) if pd.notna(x) else x)
@@ -388,10 +436,11 @@ class GoogleSheetsService:
             if len(values) > 1:
                 logger.info(f"First data row sample: {values[1][:5]}...")  # Log first 5 columns of first data row
 
-            # Normalize numeric columns B:AG to ensure numbers, not strings/times
-            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
-            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
-            values = self._normalize_numeric_columns(values, start_col=1, end_col=40, skip_columns=ratio_columns)
+            # Normalize numeric columns to ensure numbers, not strings/times
+            # Skip ratio columns to preserve "count:total" format (including NP_ variants)
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio',
+                           'NP_HD', 'NP_HDN', 'NP_HT', 'NP_Ex', 'NP_Cus', 'NP_AL', 'NP_OT', 'NP_SNF', 'NP_Managed Care Ratio', 'NP_Medicare A Ratio']
+            values = self._normalize_numeric_columns(values, start_col=1, end_col=130, skip_columns=ratio_columns)
 
             # Prepend single quote to ratio columns to force Google Sheets to treat as text
             header = values[0]
@@ -407,14 +456,14 @@ class GoogleSheetsService:
             try:
                 self.sheets_service.values().batchClear(
                     spreadsheetId=self.sheet_id,
-                    body={"ranges": [f"{self.sheet_tab}!AE:AZ"]}
+                    body={"ranges": [f"{self.sheet_tab}!AE:DZ"]}
                 ).execute()
             except Exception as e:
                 logger.warning(f"Could not clear AA:AC columns: {e}")
             
             # 2) Clear main data range to remove extra rows
             try:
-                range_name = f"{self.sheet_tab}!A1:AZ10000"
+                range_name = f"{self.sheet_tab}!A1:DZ10000"
                 self.sheets_service.values().clear(
                     spreadsheetId=self.sheet_id,
                     range=range_name
@@ -627,7 +676,7 @@ class GoogleSheetsService:
             logger.info(f"Reading data from Summary tab of sheet {self.sheet_id}")
             source_data = self.sheets_service.values().get(
                 spreadsheetId=self.sheet_id,
-                range=f"{self.sheet_tab}!A:AZ"
+                range=f"{self.sheet_tab}!A:DZ"
             ).execute()
             
             source_values = source_data.get('values', [])
@@ -636,10 +685,11 @@ class GoogleSheetsService:
                 # Still return the sheet URL even if no data
                 return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
             
-            # Normalize numeric columns B:AG before writing to Test sheet
-            # Skip ratio columns (HD, HDN, HT, Ex, Cus, AL, OT, SNF, Managed Care Ratio, Medicare A Ratio) to preserve "count:total" format
-            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio']
-            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=40, skip_columns=ratio_columns)
+            # Normalize numeric columns before writing to Test sheet
+            # Skip ratio columns to preserve "count:total" format (including NP_ variants)
+            ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio',
+                           'NP_HD', 'NP_HDN', 'NP_HT', 'NP_Ex', 'NP_Cus', 'NP_AL', 'NP_OT', 'NP_SNF', 'NP_Managed Care Ratio', 'NP_Medicare A Ratio']
+            source_values = self._normalize_numeric_columns(source_values, start_col=1, end_col=130, skip_columns=ratio_columns)
 
             # Prepend single quote to ratio columns to force Google Sheets to treat as text
             if len(source_values) > 0:
@@ -658,7 +708,7 @@ class GoogleSheetsService:
             logger.info(f"Clearing existing data in {test_sheet_tab} tab of Test sheet")
             self.sheets_service.values().clear(
                 spreadsheetId=test_sheet_id,
-                range=f"{test_sheet_tab}!A1:AZ10000"
+                range=f"{test_sheet_tab}!A1:DZ10000"
             ).execute()
             
             # Paste data starting at A1
@@ -777,7 +827,7 @@ class GoogleSheetsService:
             logger.info(f"Reading data from {raw_data_tab} tab")
             raw_data = self.sheets_service.values().get(
                 spreadsheetId=test_sheet_id,
-                range=f"{raw_data_tab}!A:AZ"
+                range=f"{raw_data_tab}!A:DZ"
             ).execute()
             
             raw_values = raw_data.get('values', [])
@@ -814,13 +864,19 @@ class GoogleSheetsService:
             # Determine the last column letter based on comparison mode
             last_col = "X" if comparison_mode else "P"
 
-            # Clear data range in Facility_Data tab (preserve header row 1, clear all old data)
-            logger.info(f"Clearing data range A2:{last_col}100 in {facility_data_tab} tab (preserving header and graphs)")
+            # Always clear through column X to remove stale NP_ data from previous comparison runs
+            clear_col = "X"
+            logger.info(f"Clearing data range A2:{clear_col}100 in {facility_data_tab} tab (removing all old data including NP_ columns)")
             self.sheets_service.values().clear(
                 spreadsheetId=test_sheet_id,
-                range=f"{facility_data_tab}!A2:{last_col}100"
+                range=f"{facility_data_tab}!A2:{clear_col}100"
             ).execute()
-            logger.info(f"Successfully cleared old data from {facility_data_tab} tab")
+            # Also clear headers row to remove stale NP_ headers if comparison mode switched off
+            self.sheets_service.values().clear(
+                spreadsheetId=test_sheet_id,
+                range=f"{facility_data_tab}!A1:{clear_col}1"
+            ).execute()
+            logger.info(f"Successfully cleared old data and headers from {facility_data_tab} tab")
 
             # Write headers in row 1 if needed (or update them)
             headers = ["Facilities", "Managed Care Average LOS", "Medicare A Average LOS",
