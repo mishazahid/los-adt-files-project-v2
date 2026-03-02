@@ -5,6 +5,10 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import uvicorn
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load .env before any service initialization
+load_dotenv()
 
 from backend.routes import upload, status, download
 from backend.config import job_status, UPLOAD_DIR, OUTPUT_DIR, LOGS_DIR
