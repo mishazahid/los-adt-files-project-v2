@@ -321,7 +321,7 @@ class PipelineService:
                 
                 # Step 5.5: Generate Test Fac PDF using Apps Script
                 await self._log(log_file, f"[{datetime.now()}] Step 5.5: Generating Test Fac PDF via Apps Script...")
-                test_fac_pdf_result = await self.apps_script_service.generate_test_fac_pdf()
+                test_fac_pdf_result = await self.apps_script_service.generate_test_fac_pdf(comparison_mode=comparison_mode)
                 if test_fac_pdf_result.get("success"):
                     results["steps_completed"].append("test_fac_pdf_generation")
                     result_data = test_fac_pdf_result.get("result", {})
@@ -353,7 +353,7 @@ class PipelineService:
             
             # Step 6: Generate Facility Summary PDF using Apps Script
             await self._log(log_file, f"[{datetime.now()}] Step 6: Generating Facility Summary PDF via Apps Script...")
-            pdf_result = await self.apps_script_service.generate_pdf()
+            pdf_result = await self.apps_script_service.generate_pdf(comparison_mode=comparison_mode)
             if pdf_result.get("success"):
                 results["steps_completed"].append("pdf_generation")
                 # Extract PDF link from result if available

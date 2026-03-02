@@ -149,24 +149,32 @@ class GoogleAppsScriptService:
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
     
-    async def generate_pdf(self) -> dict:
+    async def generate_pdf(self, comparison_mode: bool = False) -> dict:
         """
         Execute the generatePDF() function in Apps Script
         Tries Web App URL first (simpler), falls back to API if available
-        
+
+        Args:
+            comparison_mode: When True, tells Apps Script to include Non-Puzzle slides
+
         Returns:
             Dictionary with success status and PDF link if available
         """
+        extra_data = {}
+        if comparison_mode:
+            extra_data["comparison_mode"] = True
+            logger.info("Passing comparison_mode=True to Facility Summary Apps Script")
+
         # Try Web App URL first (simpler, no special permissions needed)
         if self.web_app_url:
             logger.info(f"Using Web App URL: {self.web_app_url[:50]}...")
-            return await self._execute_via_web_app('generatePDF')
-        
+            return await self._execute_via_web_app('generatePDF', extra_data=extra_data)
+
         # Fall back to API method
         logger.warning(f"Web App URL not set, falling back to API method. GOOGLE_APPS_SCRIPT_WEB_APP_URL is: {os.getenv('GOOGLE_APPS_SCRIPT_WEB_APP_URL', 'NOT SET')}")
         return await self.execute_function('generatePDF')
     
-    async def _execute_via_web_app(self, function_name: str) -> dict:
+    async def _execute_via_web_app(self, function_name: str, extra_data: dict = None) -> dict:
         """
         Execute Apps Script function via Web App deployment (HTTP POST)
         Uses the default web_app_url
@@ -174,8 +182,8 @@ class GoogleAppsScriptService:
         if not self.web_app_url:
             logger.warning("Web App URL not set")
             return {"success": False, "error": "Web App URL not configured"}
-        
-        return await self._execute_via_web_app_url(function_name, self.web_app_url)
+
+        return await self._execute_via_web_app_url(function_name, self.web_app_url, extra_data=extra_data)
     
     async def generate_facility_slides(self) -> dict:
         """
@@ -195,30 +203,39 @@ class GoogleAppsScriptService:
         """
         return await self.execute_function('generateExecutiveSummarySlide')
     
-    async def generate_test_fac_pdf(self) -> dict:
+    async def generate_test_fac_pdf(self, comparison_mode: bool = False) -> dict:
         """
         Execute the createFacilityReport() function in Test Fac Apps Script
         Uses the Test Fac Web App URL
-        
+
+        Args:
+            comparison_mode: When True, tells Apps Script to include Non-Puzzle slides
+
         Returns:
             Dictionary with success status and PDF link if available
         """
         if not self.test_fac_web_app_url:
             logger.warning("Test Fac Web App URL not set")
             return {"success": False, "error": "Test Fac Web App URL not configured"}
-        
+
+        extra_data = {}
+        if comparison_mode:
+            extra_data["comparison_mode"] = True
+            logger.info("Passing comparison_mode=True to Test Fac Apps Script")
+
         logger.info(f"Using Test Fac Web App URL: {self.test_fac_web_app_url[:50]}...")
-        return await self._execute_via_web_app_url('createFacilityReport', self.test_fac_web_app_url)
+        return await self._execute_via_web_app_url('createFacilityReport', self.test_fac_web_app_url, extra_data=extra_data)
     
-    async def _execute_via_web_app_url(self, function_name: str, web_app_url: str) -> dict:
+    async def _execute_via_web_app_url(self, function_name: str, web_app_url: str, extra_data: dict = None) -> dict:
         """
         Execute Apps Script function via Web App deployment (HTTP POST)
         Generic version that accepts any Web App URL
-        
+
         Args:
             function_name: Name of the function to execute
             web_app_url: The Web App URL to call
-        
+            extra_data: Optional dict of extra fields to include in the POST body
+
         Returns:
             Dictionary with success status and result
         """
@@ -230,14 +247,20 @@ class GoogleAppsScriptService:
                     url = url.replace('/dev', '/exec')
                 else:
                     url = url + '/exec'
-            
+
             logger.info(f"Calling Web App URL: {url[:80]}...")
-            
-            # Call the web app URL with the function name as a parameter
+
+            # Build POST body with function name and any extra data
+            post_body = {"function": function_name}
+            if extra_data:
+                post_body.update(extra_data)
+                logger.info(f"POST body includes extra data: {list(extra_data.keys())}")
+
+            # Call the web app URL
             async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
                 response = await client.post(
                     url,
-                    json={"function": function_name},
+                    json=post_body,
                     headers={"Content-Type": "application/json"}
                 )
                 
