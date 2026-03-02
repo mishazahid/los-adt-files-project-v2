@@ -103,9 +103,7 @@ class GoogleSheetsService:
         for r_idx, row in enumerate(values):
             if r_idx == 0:
                 continue  # header
-            # Ensure row is long enough
-            while len(row) <= end_col:
-                row.append('')
+            # Only process columns that exist in the row — do NOT pad with empty values
             for c_idx in range(start_col, min(len(row), end_col + 1)):
                 if c_idx < len(row):
                     # Skip if already empty string or None
