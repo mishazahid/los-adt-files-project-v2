@@ -682,7 +682,17 @@ class GoogleSheetsService:
                 logger.warning("No data found in Summary sheet to copy")
                 # Still return the sheet URL even if no data
                 return f"https://docs.google.com/spreadsheets/d/{test_sheet_id}"
-            
+
+            # Pad all rows to match header length — Google Sheets API returns ragged
+            # arrays (trailing empty cells are omitted), so NP_ columns with empty
+            # values would be lost without this padding
+            if len(source_values) > 1:
+                header_len = len(source_values[0])
+                for i in range(1, len(source_values)):
+                    while len(source_values[i]) < header_len:
+                        source_values[i].append('')
+                logger.info(f"Padded {len(source_values)-1} data rows to {header_len} columns (matching header)")
+
             # Normalize numeric columns before writing to Test sheet
             # Skip ratio columns to preserve "count:total" format (including NP_ variants)
             ratio_columns = ['HD', 'HDN', 'HT', 'Ex', 'Cus', 'AL', 'OT', 'SNF', 'Managed Care Ratio', 'Medicare A Ratio',
@@ -832,7 +842,14 @@ class GoogleSheetsService:
             if not raw_values or len(raw_values) < 2:
                 logger.warning(f"No data found in {raw_data_tab} tab (need at least header + 1 row)")
                 return False
-            
+
+            # Pad all rows to match header length (API returns ragged arrays)
+            if len(raw_values) > 1:
+                header_len = len(raw_values[0])
+                for i in range(1, len(raw_values)):
+                    while len(raw_values[i]) < header_len:
+                        raw_values[i].append('')
+
             # Get headers from Raw_Data
             raw_headers = raw_values[0]
             raw_data_rows = raw_values[1:]  # Skip header
