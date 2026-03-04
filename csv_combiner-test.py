@@ -651,12 +651,12 @@ def export_summarized_data(df, output_path, facility_name, ltc_gross_encounters=
         summarized_data['Total Gross LTC Encounters'] = [ltc_gross_encounters]
         summarized_data['Patients Served (LTC)'] = [ltc_unique_patients]
         summarized_data['Inj_Total'] = [inj.get('total', 0)]
-        summarized_data['Inj_20600'] = [inj.get('20600', 0)]
-        summarized_data['Inj_20604'] = [inj.get('20604', 0)]
-        summarized_data['Inj_20605'] = [inj.get('20605', 0)]
-        summarized_data['Inj_20606'] = [inj.get('20606', 0)]
-        summarized_data['Inj_20610'] = [inj.get('20610', 0)]
-        summarized_data['Inj_20611'] = [inj.get('20611', 0)]
+        summarized_data['Inj_Small_Joint'] = [inj.get('20600', 0)]
+        summarized_data['Inj_Small_Joint_US'] = [inj.get('20604', 0)]
+        summarized_data['Inj_Int_Joint'] = [inj.get('20605', 0)]
+        summarized_data['Inj_Int_Joint_US'] = [inj.get('20606', 0)]
+        summarized_data['Inj_Major_Joint'] = [inj.get('20610', 0)]
+        summarized_data['Inj_Major_Joint_US'] = [inj.get('20611', 0)]
 
         summarized_df = pd.DataFrame(summarized_data)
 
@@ -691,12 +691,12 @@ def export_summarized_data(df, output_path, facility_name, ltc_gross_encounters=
         print(f"    Total Gross LTC Encounters: {ltc_gross_encounters}")
         print(f"    Patients Served (LTC): {ltc_unique_patients}")
         print(f"    Inj Total: {inj.get('total', 0)}")
-        print(f"    Inj 20600: {inj.get('20600', 0)}")
-        print(f"    Inj 20604: {inj.get('20604', 0)}")
-        print(f"    Inj 20605: {inj.get('20605', 0)}")
-        print(f"    Inj 20606: {inj.get('20606', 0)}")
-        print(f"    Inj 20610: {inj.get('20610', 0)}")
-        print(f"    Inj 20611: {inj.get('20611', 0)}")
+        print(f"    Small Joint Inj: {inj.get('20600', 0)}")
+        print(f"    Small Joint Inj w/US: {inj.get('20604', 0)}")
+        print(f"    Intermediate Joint Inj: {inj.get('20605', 0)}")
+        print(f"    Intermediate Joint Inj w/US: {inj.get('20606', 0)}")
+        print(f"    Major Joint Inj: {inj.get('20610', 0)}")
+        print(f"    Major Joint Inj w/US: {inj.get('20611', 0)}")
 
         return summarized_df
 
@@ -732,12 +732,12 @@ def export_summarized_data_with_comparison(puzzle_df, non_puzzle_df, output_path
         summarized_data['Total Gross LTC Encounters'] = [ltc_gross_encounters]
         summarized_data['Patients Served (LTC)'] = [ltc_unique_patients]
         summarized_data['Inj_Total'] = [inj.get('total', 0)]
-        summarized_data['Inj_20600'] = [inj.get('20600', 0)]
-        summarized_data['Inj_20604'] = [inj.get('20604', 0)]
-        summarized_data['Inj_20605'] = [inj.get('20605', 0)]
-        summarized_data['Inj_20606'] = [inj.get('20606', 0)]
-        summarized_data['Inj_20610'] = [inj.get('20610', 0)]
-        summarized_data['Inj_20611'] = [inj.get('20611', 0)]
+        summarized_data['Inj_Small_Joint'] = [inj.get('20600', 0)]
+        summarized_data['Inj_Small_Joint_US'] = [inj.get('20604', 0)]
+        summarized_data['Inj_Int_Joint'] = [inj.get('20605', 0)]
+        summarized_data['Inj_Int_Joint_US'] = [inj.get('20606', 0)]
+        summarized_data['Inj_Major_Joint'] = [inj.get('20610', 0)]
+        summarized_data['Inj_Major_Joint_US'] = [inj.get('20611', 0)]
         # Non-Puzzle columns (NP_ prefix)
         summarized_data.update(_build_summarized_columns(np_metrics, prefix="NP_"))
 

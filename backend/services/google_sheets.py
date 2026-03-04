@@ -775,12 +775,12 @@ class GoogleSheetsService:
         - Column H: Avg GG Gain - MA (from Raw_Data "GG_Gain_MA")
         - Column I: Avg GG Gain - Overall (from Raw_Data "GG_Gain_Overall")
         - Column J: Total Injections (from Raw_Data "Inj_Total")
-        - Column K: Inj 20600 (from Raw_Data "Inj_20600")
-        - Column L: Inj 20604 (from Raw_Data "Inj_20604")
-        - Column M: Inj 20605 (from Raw_Data "Inj_20605")
-        - Column N: Inj 20606 (from Raw_Data "Inj_20606")
-        - Column O: Inj 20610 (from Raw_Data "Inj_20610")
-        - Column P: Inj 20611 (from Raw_Data "Inj_20611")
+        - Column K: Small Joint Inj (from Raw_Data "Inj_Small_Joint")
+        - Column L: Small Joint Inj w/US (from Raw_Data "Inj_Small_Joint_US")
+        - Column M: Intermediate Joint Inj (from Raw_Data "Inj_Int_Joint")
+        - Column N: Intermediate Joint Inj w/US (from Raw_Data "Inj_Int_Joint_US")
+        - Column O: Major Joint Inj (from Raw_Data "Inj_Major_Joint")
+        - Column P: Major Joint Inj w/US (from Raw_Data "Inj_Major_Joint_US")
 
         Clears A2:P100 in Facility_Data tab (preserves header and graphs).
         Copies all facilities from Raw_Data.
@@ -810,12 +810,12 @@ class GoogleSheetsService:
                 ("GG_Gain_MA", "H"),   # Avg GG Gain - Medicare A
                 ("GG_Gain_Overall", "I"),  # Avg GG Gain - Overall
                 ("Inj_Total", "J"),       # Total Injections
-                ("Inj_20600", "K"),       # Inj 20600
-                ("Inj_20604", "L"),       # Inj 20604
-                ("Inj_20605", "M"),       # Inj 20605
-                ("Inj_20606", "N"),       # Inj 20606
-                ("Inj_20610", "O"),       # Inj 20610
-                ("Inj_20611", "P")        # Inj 20611
+                ("Inj_Small_Joint", "K"),     # Small Joint Inj
+                ("Inj_Small_Joint_US", "L"),  # Small Joint Inj w/US
+                ("Inj_Int_Joint", "M"),       # Intermediate Joint Inj
+                ("Inj_Int_Joint_US", "N"),    # Intermediate Joint Inj w/US
+                ("Inj_Major_Joint", "O"),     # Major Joint Inj
+                ("Inj_Major_Joint_US", "P")   # Major Joint Inj w/US
             ]
 
             # Extend with NP_ columns when comparison mode is enabled
@@ -897,8 +897,9 @@ class GoogleSheetsService:
             headers = ["Facilities", "Managed Care Average LOS", "Medicare A Average LOS",
                       "Section GG Improv", "5 Day Mean", "End of PPS Mean",
                       "Avg GG Gain - MC", "Avg GG Gain - MA", "Avg GG Gain - Overall",
-                      "Total Injections", "Inj 20600", "Inj 20604",
-                      "Inj 20605", "Inj 20606", "Inj 20610", "Inj 20611"]
+                      "Total Injections", "Small Joint Inj", "Small Joint Inj w/US",
+                      "Intermediate Joint Inj", "Intermediate Joint Inj w/US",
+                      "Major Joint Inj", "Major Joint Inj w/US"]
             if comparison_mode:
                 headers.extend([
                     "NP MC Avg LOS", "NP MA Avg LOS",
