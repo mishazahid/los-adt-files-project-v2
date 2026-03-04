@@ -86,6 +86,11 @@ function generateFacilitySlides(comparisonMode) {
     // 4) Resize the percentage bars on the target slide
     updateBarsForSlide_(pres, TARGET_SLIDE_INDEX, headers, row);
 
+    // 4b) If comparison mode, also resize NP bars on slide 2
+    if (comparisonMode && pres.getSlides().length > 1) {
+      updateBarsForSlide_(pres, 1, headers, row, 'NP_');
+    }
+
     pres.saveAndClose();
 
     // 5) Optional: export to PDF
@@ -109,19 +114,21 @@ function generateFacilitySlides(comparisonMode) {
 
 /**
  * Resize the bar shapes by percentage, keeping LEFT edge fixed.
+ * @param {string} prefix - Column header prefix, e.g. '' for Puzzle, 'NP_' for Non-Puzzle
  */
-function updateBarsForSlide_(presentation, slideIndex, headers, row) {
+function updateBarsForSlide_(presentation, slideIndex, headers, row, prefix) {
+  prefix = prefix || '';
   const slide = presentation.getSlides()[slideIndex];
 
   const map = [
-    { header: HEADER_HOME,     alt: ALT_HOME },
-    { header: HEADER_HOSPITAL, alt: ALT_HOSPITAL },
-    { header: HEADER_SNF,      alt: ALT_SNF },
-    { header: HEADER_EXPIRED,  alt: ALT_EXPIRED },
-    { header: HEADER_REHAB,    alt: ALT_REHAB },
-    { header: HEADER_HOSPICE,  alt: ALT_HOSPICE },
-    { header: HEADER_OBS,      alt: ALT_OBS },
-    { header: HEADER_OTHER,    alt: ALT_OTHER }
+    { header: prefix + HEADER_HOME,     alt: ALT_HOME },
+    { header: prefix + HEADER_HOSPITAL, alt: ALT_HOSPITAL },
+    { header: prefix + HEADER_SNF,      alt: ALT_SNF },
+    { header: prefix + HEADER_EXPIRED,  alt: ALT_EXPIRED },
+    { header: prefix + HEADER_REHAB,    alt: ALT_REHAB },
+    { header: prefix + HEADER_HOSPICE,  alt: ALT_HOSPICE },
+    { header: prefix + HEADER_OBS,      alt: ALT_OBS },
+    { header: prefix + HEADER_OTHER,    alt: ALT_OTHER }
   ];
 
   map.forEach(({ header, alt }) => {
@@ -416,6 +423,12 @@ function generatePDF(comparisonMode) {
     });
 
     updateBarsForSlide_(facPres, TARGET_SLIDE_INDEX, headers, row);
+
+    // Also resize NP bars on slide 2 when comparison mode is ON
+    if (comparisonMode && facPres.getSlides().length > 1) {
+      updateBarsForSlide_(facPres, 1, headers, row, 'NP_');
+    }
+
     facPres.saveAndClose();
 
     const srcSlides = SlidesApp.openById(facCopy.getId()).getSlides();

@@ -1103,10 +1103,18 @@ class GoogleSheetsService:
             logger.info(f"  Removed 'of' prefix -> '{facility_lower}'")
         
         # Mapping of facility names to tab names
-        # Tab names: Clare, Mt Pleasant, Holland, at the Shore, Ludington, Grand Rapids, 
-        # Wyoming, Sault Ste. Marie, Autumn Woods, Farmington, Grand Blanc, Howell, 
+        # Medilodge tab names: Clare, Mt Pleasant, Holland, at the Shore, Ludington, Grand Rapids,
+        # Wyoming, Sault Ste. Marie, Autumn Woods, Farmington, Grand Blanc, Howell,
         # Monroe, Livingston, Montrose, Shoreline, Sterling Heights
+        # Monarch tab names: Maplewood Rehabilitation Center, The Villas at Osseo,
+        # Estates of St. Louis Park, The Villas at the Cedars, Villas of St. Louis Park,
+        # The Villas at Brookview, The Villas at Richfield, Villas of St. Paul,
+        # Estates of Roseville, The Villas at New Brighton
+        #
+        # NOTE: More specific keys MUST come before less specific keys because the loop
+        # returns on first match (key == facility_lower OR key in facility_lower).
         facility_mapping = {
+            # --- Medilodge facilities ---
             'clare': 'Clare',
             'mt pleasant': 'Mt. Pleasant',
             'mt. pleasant': 'Mt. Pleasant',
@@ -1128,6 +1136,43 @@ class GoogleSheetsService:
             'shoreline': 'Shoreline',
             'sterling heights': 'Sterling Heights',
             'sterling': 'Sterling Heights',
+            # --- Monarch / Villas / Estates facilities ---
+            # Put more specific multi-word keys first to avoid partial collisions
+            'villas at st. louis park': 'Villas of St. Louis Park',
+            'villas of st. louis park': 'Villas of St. Louis Park',
+            'the villas at st. louis park': 'Villas of St. Louis Park',
+            'estates at st. louis park': 'Estates of St. Louis Park',
+            'estates of st. louis park': 'Estates of St. Louis Park',
+            'the estates at st. louis park': 'Estates of St. Louis Park',
+            'villas at st. paul': 'Villas of St. Paul',
+            'villas of st. paul': 'Villas of St. Paul',
+            'the villas at st. paul': 'Villas of St. Paul',
+            'new brighton': 'The Villas at New Brighton',
+            'villas at new brighton': 'The Villas at New Brighton',
+            'the villas at new brighton': 'The Villas at New Brighton',
+            'estates at roseville': 'Estates of Roseville',
+            'estates of roseville': 'Estates of Roseville',
+            'the estates at roseville': 'Estates of Roseville',
+            'roseville': 'Estates of Roseville',
+            'villas at the cedars': 'The Villas at the Cedars',
+            'the villas at the cedars': 'The Villas at the Cedars',
+            'villas at cedars': 'The Villas at the Cedars',
+            'the villas at cedars': 'The Villas at the Cedars',
+            'cedars': 'The Villas at the Cedars',
+            'villas at brookview': 'The Villas at Brookview',
+            'the villas at brookview': 'The Villas at Brookview',
+            'brookview': 'The Villas at Brookview',
+            'villas at osseo': 'The Villas at Osseo',
+            'the villas at osseo': 'The Villas at Osseo',
+            'osseo': 'The Villas at Osseo',
+            'villas at richfield': 'The Villas at Richfield',
+            'the villas at richfield': 'The Villas at Richfield',
+            'richfield': 'The Villas at Richfield',
+            'maplewood rehabilitation center': 'Maplewood Rehabilitation Center',
+            'maplewood rehabilitation': 'Maplewood Rehabilitation Center',
+            'maplewood rehab center': 'Maplewood Rehabilitation Center',
+            'maplewood rehab': 'Maplewood Rehabilitation Center',
+            'maplewood': 'Maplewood Rehabilitation Center',
         }
         
         # Try exact match first

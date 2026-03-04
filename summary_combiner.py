@@ -179,6 +179,27 @@ def extract_facility_name_from_combined_file(filename: str) -> str:
         formatted_name = formatted_name.replace('St ', 'St. ')
         formatted_name = formatted_name.replace('Mt ', 'Mt. ')
         return formatted_name
+    # --- Monarch / Villas / Estates facilities ---
+    elif 'Brookview' in display_name or 'brookview' in display_name:
+        return 'The Villas at Brookview'
+    elif 'Osseo' in display_name or 'osseo' in display_name:
+        return 'The Villas at Osseo'
+    elif 'Cedars' in display_name or 'cedars' in display_name:
+        return 'The Villas at the Cedars'
+    elif 'Richfield' in display_name or 'richfield' in display_name:
+        return 'The Villas at Richfield'
+    elif 'Brighton' in display_name or 'brighton' in display_name:
+        return 'The Villas at New Brighton'
+    elif ('Villas' in display_name or 'villas' in display_name) and ('Louis' in display_name or 'louis' in display_name):
+        return 'The Villas at St. Louis Park'
+    elif ('Villas' in display_name or 'villas' in display_name) and ('Paul' in display_name or 'paul' in display_name):
+        return 'The Villas at St. Paul'
+    elif ('Estates' in display_name or 'estates' in display_name) and ('Roseville' in display_name or 'roseville' in display_name):
+        return 'The Estates at Roseville'
+    elif ('Estates' in display_name or 'estates' in display_name) and ('Louis' in display_name or 'louis' in display_name):
+        return 'The Estates at St. Louis Park'
+    elif 'Maplewood' in display_name or 'maplewood' in display_name:
+        return 'Maplewood Rehabilitation Center'
     else:
         # Default formatting for other facilities
         formatted_name = display_name.title()

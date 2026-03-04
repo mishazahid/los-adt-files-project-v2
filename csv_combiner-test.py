@@ -936,6 +936,9 @@ def extract_facility_name_from_filename(filename: str, file_type: str) -> str:
     # Remove common suffixes that might appear in filenames (q3, q2, q1, q4, snf, etc.)
     # Remove quarter suffixes (q3, q2, q1, q4) - case insensitive, with optional spaces
     name = re.sub(r'\s*(q[1-4]|quarter\s*[1-4])\s*$', '', name, flags=re.IGNORECASE)
+
+    # Remove trailing standalone numbers from parenthetical suffixes like "(1)" -> "_1_" -> " 1 "
+    name = re.sub(r'\s+\d+\s*$', '', name).strip()
     
     # Remove facility type suffixes (snf, ltc, health care, llc, etc.) - case insensitive
     # Remove multiple suffixes iteratively to handle cases like "health care llc"
@@ -983,28 +986,39 @@ def normalize_facility_name_for_matching(facility_name: str) -> str:
     """
     # Convert to lowercase and replace underscores/dashes with spaces
     normalized = facility_name.lower().replace('_', ' ').replace('-', ' ').strip()
-    
+
     # Remove "of " prefix if present
     if normalized.startswith('of '):
         normalized = normalized[3:]
-    
+
     # Remove common suffixes that might appear in filenames (q3, q2, q1, q4, snf, etc.)
     # Remove quarter suffixes (q3, q2, q1, q4) - case insensitive, with optional spaces
     normalized = re.sub(r'\s*(q[1-4]|quarter\s*[1-4])\s*$', '', normalized, flags=re.IGNORECASE)
-    
+
     # Remove facility type suffixes (snf, ltc, etc.) - case insensitive
     normalized = re.sub(r'\s*(snf|ltc|facility|center|home)\s*$', '', normalized, flags=re.IGNORECASE)
-    
+
+    # Remove trailing standalone numbers from parenthetical suffixes like "(1)"
+    normalized = re.sub(r'\s+\d+\s*$', '', normalized).strip()
+
+    # Normalize "rehab" -> "rehabilitation" for consistent matching across files
+    # e.g. "Maplewood Rehab Center" (ADT filename) == "Maplewood Rehabilitation Center" (LOS/GPT)
+    normalized = re.sub(r'\brehab\b', 'rehabilitation', normalized, flags=re.IGNORECASE)
+
+    # Normalize "at the X" -> "at X" to handle naming variations like
+    # "Villas at Cedars" (ADT PDF name) vs "Villas at the Cedars" (LOS PDF/GPT name)
+    normalized = re.sub(r'\bat the\b', 'at', normalized)
+
     # Normalize Mt. Pleasant variations (m. pleasant, mt. pleasant, mt pleasant -> mt pleasant)
     normalized = re.sub(r'\bm\.?\s*pleasant\b', 'mt pleasant', normalized, flags=re.IGNORECASE)
     normalized = re.sub(r'\bmt\.?\s*pleasant\b', 'mt pleasant', normalized, flags=re.IGNORECASE)
-    
+
     # Normalize multiple spaces to single space
     normalized = re.sub(r'\s+', ' ', normalized)
-    
+
     # Remove leading/trailing whitespace
     normalized = normalized.strip()
-    
+
     return normalized
 
 
@@ -1055,6 +1069,27 @@ def format_facility_name_for_display(facility_name: str) -> str:
         return 'Medilodge of Shoreline'
     elif display_name == 'livingston':
         return 'Medilodge of Livingston'
+    # --- Monarch / Villas / Estates facilities ---
+    elif 'brookview' in display_name:
+        return 'The Villas at Brookview'
+    elif 'osseo' in display_name:
+        return 'The Villas at Osseo'
+    elif 'cedars' in display_name:
+        return 'The Villas at the Cedars'
+    elif 'richfield' in display_name:
+        return 'The Villas at Richfield'
+    elif 'new brighton' in display_name or 'brighton' in display_name:
+        return 'The Villas at New Brighton'
+    elif 'villas' in display_name and 'louis park' in display_name:
+        return 'The Villas at St. Louis Park'
+    elif 'villas' in display_name and 'paul' in display_name:
+        return 'The Villas at St. Paul'
+    elif 'estates' in display_name and 'roseville' in display_name:
+        return 'The Estates at Roseville'
+    elif 'estates' in display_name and 'louis park' in display_name:
+        return 'The Estates at St. Louis Park'
+    elif 'maplewood' in display_name:
+        return 'Maplewood Rehabilitation Center'
     else:
         # Default formatting for other facilities
         # Handle special cases for abbreviations
@@ -1160,19 +1195,59 @@ def find_matching_files(adt_folder: str, patient_folder: str, visit_folder: str)
     normalized_patient_map = {normalize_facility_name_for_matching(name): (name, file) 
                               for name, file in patient_facilities.items()}
     
+    matched_adt_names = set()
+
     for normalized_name, (adt_facility_name, adt_file) in normalized_adt_map.items():
         if normalized_name in normalized_patient_map:
             patient_facility_name, patient_file = normalized_patient_map[normalized_name]
-            # Use the visit folder path for all matches (will combine all files in folder)
             matches.append((adt_file, patient_file, visit_folder))
+            matched_adt_names.add(normalized_name)
             print(f"[OK] Match found: '{adt_facility_name}' <-> '{patient_facility_name}' (normalized: '{normalized_name}')")
             print(f"  ADT: {Path(adt_file).name}")
             print(f"  Patient: {Path(patient_file).name}")
             print(f"  Visit: {visit_folder}")
         else:
-            print(f"[FAILED] No matching patient file for ADT: '{adt_facility_name}' (normalized: '{normalized_name}')")
+            print(f"[WARNING] No exact match for ADT: '{adt_facility_name}' (normalized: '{normalized_name}')")
+            print(f"  Will try fuzzy word-overlap match...")
+
+    # Fuzzy fallback: match unmatched ADT files by significant word overlap
+    # Handles edge cases like abbreviation differences after normalization
+    STOPWORDS = {'the', 'and', 'for', 'at', 'of', 'in', 'a', 'an'}
+    already_matched_patient = {normalize_facility_name_for_matching(extract_facility_name_from_filename(f, 'patient'))
+                                for _, f, _ in matches}
+
+    for normalized_name, (adt_facility_name, adt_file) in normalized_adt_map.items():
+        if normalized_name in matched_adt_names:
+            continue  # already matched exactly
+
+        adt_words = set(w for w in normalized_name.split() if len(w) > 2 and w not in STOPWORDS)
+        best_score = 0
+        best_match = None
+
+        for p_norm, (p_fac, p_file) in normalized_patient_map.items():
+            if p_norm in already_matched_patient:
+                continue  # patient file already used
+            p_words = set(w for w in p_norm.split() if len(w) > 2 and w not in STOPWORDS)
+            if not adt_words or not p_words:
+                continue
+            overlap = len(adt_words & p_words)
+            score = overlap / max(len(adt_words), len(p_words))
+            if score > best_score:
+                best_score = score
+                best_match = (p_norm, p_fac, p_file)
+
+        if best_score >= 0.7 and best_match:
+            p_norm, p_fac, p_file = best_match
+            matches.append((adt_file, p_file, visit_folder))
+            matched_adt_names.add(normalized_name)
+            already_matched_patient.add(p_norm)
+            print(f"[OK] Fuzzy match ({best_score:.0%}): '{adt_facility_name}' <-> '{p_fac}'")
+            print(f"  ADT: {Path(adt_file).name}")
+            print(f"  Patient: {Path(p_file).name}")
+        else:
+            print(f"[FAILED] No match found for ADT: '{adt_facility_name}' (normalized: '{normalized_name}')")
             print(f"  Available patient facilities (normalized): {list(normalized_patient_map.keys())}")
-    
+
     print(f"\nTotal matches found: {len(matches)}")
     return matches
 
