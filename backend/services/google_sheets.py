@@ -397,11 +397,11 @@ class GoogleSheetsService:
                             if 'INC' in values:
                                 df.loc[mask, 'INC'] = values['INC']
                             if 'GG_Gain_MC' in values:
-                                df.loc[mask, 'GG_Gain_MC'] = values['GG_Gain_MC']
+                                df.loc[mask, 'GG_Gain_MC'] = round(float(values['GG_Gain_MC']), 2) if values['GG_Gain_MC'] not in ('', None) else values['GG_Gain_MC']
                             if 'GG_Gain_MA' in values:
-                                df.loc[mask, 'GG_Gain_MA'] = values['GG_Gain_MA']
+                                df.loc[mask, 'GG_Gain_MA'] = round(float(values['GG_Gain_MA']), 2) if values['GG_Gain_MA'] not in ('', None) else values['GG_Gain_MA']
                             if 'GG_Gain_Overall' in values:
-                                df.loc[mask, 'GG_Gain_Overall'] = values['GG_Gain_Overall']
+                                df.loc[mask, 'GG_Gain_Overall'] = round(float(values['GG_Gain_Overall']), 2) if values['GG_Gain_Overall'] not in ('', None) else values['GG_Gain_Overall']
                             # Populate NP_ columns if present
                             for np_key in ['NP_GS', 'NP_PPS', 'NP_INC', 'NP_GG_Gain_MC', 'NP_GG_Gain_MA', 'NP_GG_Gain_Overall']:
                                 if np_key in values and np_key in df.columns:
@@ -1024,30 +1024,46 @@ class GoogleSheetsService:
     def _shorten_facility_name_for_chart(self, facility_name: str) -> str:
         """
         Shorten facility name for chart display by removing prefixes and suffixes.
-        Examples: 
+        Examples:
             "Medilodge of Clare" -> "Clare"
             "Autumn Woods Residential" -> "Autumn Woods"
+            "The Villas at Brookview" -> "Brookview"
+            "The Estates at St. Louis Park" -> "Estates - Louis Park"
+            "Villas of St. Louis Park" -> "Villas - Louis Park"
+            "Maplewood Rehabilitation Center" -> "Maplewood"
         """
         if not facility_name:
             return facility_name
-        
-        # Remove common prefixes and suffixes
+
         name = facility_name.strip()
-        
-        # Remove "Medilodge of " prefix
-        if name.lower().startswith('medilodge of '):
-            name = name[13:].strip()  # len('medilodge of ') = 13
-        # Remove "Medilodge at the " prefix
-        elif name.lower().startswith('medilodge at the '):
-            name = name[17:].strip()  # len('medilodge at the ') = 17
-        # Remove "Medilodge at " prefix
-        elif name.lower().startswith('medilodge at '):
-            name = name[13:].strip()  # len('medilodge at ') = 13
-        
+        lower = name.lower()
+
+        # --- Monarch / Villas / Estates facilities ---
+        # St. Louis Park needs to distinguish Estates vs Villas
+        if 'estates' in lower and 'louis park' in lower:
+            return 'Estates - Louis Park'
+        if ('villas' in lower or 'villa' in lower) and 'louis park' in lower:
+            return 'Villas - Louis Park'
+        # St. Paul
+        if ('villas' in lower or 'villa' in lower) and 'paul' in lower:
+            return 'Villas - St. Paul'
+        # Single-keyword Monarch facilities
+        for keyword in ['Brookview', 'Osseo', 'Cedars', 'Richfield', 'Brighton', 'Roseville', 'Maplewood']:
+            if keyword.lower() in lower:
+                return keyword
+
+        # --- Medilodge facilities ---
+        if lower.startswith('medilodge of '):
+            name = name[13:].strip()
+        elif lower.startswith('medilodge at the '):
+            name = name[17:].strip()
+        elif lower.startswith('medilodge at '):
+            name = name[13:].strip()
+
         # Remove " Residential" suffix
         if name.lower().endswith(' residential'):
-            name = name[:-12].strip()  # len(' residential') = 12
-        
+            name = name[:-12].strip()
+
         return name
     
     async def append_data(self, data: list, sheet_name: Optional[str] = None) -> bool:
