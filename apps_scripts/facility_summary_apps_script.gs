@@ -83,6 +83,9 @@ function generateFacilitySlides(comparisonMode) {
       pres.replaceAllText(token, val);
     });
 
+    // 3b) Replace old CPT-code placeholders and label text
+    replaceCptPlaceholders_(pres, headers, row);
+
     // 4) Resize the percentage bars on the target slide
     updateBarsForSlide_(pres, TARGET_SLIDE_INDEX, headers, row);
 
@@ -422,6 +425,9 @@ function generatePDF(comparisonMode) {
       facPres.replaceAllText(token, val);
     });
 
+    // Replace old CPT-code placeholders and label text
+    replaceCptPlaceholders_(facPres, headers, row);
+
     updateBarsForSlide_(facPres, TARGET_SLIDE_INDEX, headers, row);
 
     // Also resize NP bars on slide 2 when comparison mode is ON
@@ -476,6 +482,44 @@ function generatePDF(comparisonMode) {
     folder_id: OUTPUT_FOLDER_ID
   };
 }
+
+/*********************************
+ * CPT PLACEHOLDER HELPER
+ *********************************/
+
+/**
+ * After the main headers.forEach replacement, bridge old {{Inj_20600}}-style
+ * placeholders (still in the template) to the new procedure-name column values,
+ * and replace "CPT 20600" label text with descriptive names.
+ */
+function replaceCptPlaceholders_(pres, headers, row) {
+  const aliasMap = [
+    { oldToken: '{{Inj_20600}}', colName: 'Inj_Small_Joint' },
+    { oldToken: '{{Inj_20604}}', colName: 'Inj_Small_Joint_US' },
+    { oldToken: '{{Inj_20605}}', colName: 'Inj_Int_Joint' },
+    { oldToken: '{{Inj_20606}}', colName: 'Inj_Int_Joint_US' },
+    { oldToken: '{{Inj_20610}}', colName: 'Inj_Major_Joint' },
+    { oldToken: '{{Inj_20611}}', colName: 'Inj_Major_Joint_US' }
+  ];
+  aliasMap.forEach(({ oldToken, colName }) => {
+    const idx = headers.indexOf(colName);
+    const val = idx !== -1 ? (row[idx] ?? '').toString() : '';
+    try { pres.replaceAllText(oldToken, val); } catch (e) {}
+  });
+
+  const cptLabelMap = {
+    'CPT 20600': 'Small Joint Inj',
+    'CPT 20604': 'Small Joint Inj w/US',
+    'CPT 20605': 'Intermediate Joint Inj',
+    'CPT 20606': 'Intermediate Joint Inj w/US',
+    'CPT 20610': 'Major Joint Inj',
+    'CPT 20611': 'Major Joint Inj w/US'
+  };
+  Object.entries(cptLabelMap).forEach(([oldLabel, newLabel]) => {
+    try { pres.replaceAllText(oldLabel, newLabel); } catch (e) {}
+  });
+}
+
 
 /*********************************
  * WEB APP HANDLERS

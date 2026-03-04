@@ -130,13 +130,33 @@ function getTextPlaceholders_(ss) {
     });
   }
 
-  // C) Aliases for the two problematic placeholders
+  // C) Aliases for renamed/shortened placeholders
   const aliasToToken = {
     'Inj_Total': '{{Total Inj}}',
     'Total Injections': '{{Total Inj}}',
     'Patients Served (LTC)': '{{LTC Pat}}',
-    'LTC Patients Served': '{{LTC Pat}}'
+    'LTC Patients Served': '{{LTC Pat}}',
+    // Map new procedure-name columns -> old CPT-code placeholders still in template
+    'Inj_Small_Joint':    '{{Inj_20600}}',
+    'Inj_Small_Joint_US': '{{Inj_20604}}',
+    'Inj_Int_Joint':      '{{Inj_20605}}',
+    'Inj_Int_Joint_US':   '{{Inj_20606}}',
+    'Inj_Major_Joint':    '{{Inj_20610}}',
+    'Inj_Major_Joint_US': '{{Inj_20611}}'
   };
+
+  // D) Replace CPT label text in template with descriptive procedure names
+  const cptLabelMap = {
+    'CPT 20600': 'Small Joint Inj',
+    'CPT 20604': 'Small Joint Inj w/US',
+    'CPT 20605': 'Intermediate Joint Inj',
+    'CPT 20606': 'Intermediate Joint Inj w/US',
+    'CPT 20610': 'Major Joint Inj',
+    'CPT 20611': 'Major Joint Inj w/US'
+  };
+  Object.entries(cptLabelMap).forEach(([oldLabel, newLabel]) => {
+    placeholders[oldLabel] = newLabel;
+  });
 
   Object.keys(aliasToToken).forEach(sourceKey => {
     const sourceToken = `{{${sourceKey}}}`;

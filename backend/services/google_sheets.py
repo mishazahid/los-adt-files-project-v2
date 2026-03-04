@@ -1001,6 +1001,39 @@ class GoogleSheetsService:
             ).execute()
             
             logger.info(f"Added Network Average row at row {network_avg_row}")
+
+            # Apply 0.00 number format to GG Gain columns (G, H, I = indices 6, 7, 8)
+            gg_col_indices = [6, 7, 8]  # 0-based: G=6, H=7, I=8
+            last_data_row = network_avg_row
+            format_requests = []
+            for col_idx in gg_col_indices:
+                format_requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": self._get_sheet_id(test_sheet_id, facility_data_tab),
+                            "startRowIndex": 1,       # row 2 (skip header)
+                            "endRowIndex": last_data_row,
+                            "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "numberFormat": {"type": "NUMBER", "pattern": "0.00"}
+                            }
+                        },
+                        "fields": "userEnteredFormat.numberFormat"
+                    }
+                })
+            if format_requests:
+                try:
+                    self.sheets_service.spreadsheets().batchUpdate(
+                        spreadsheetId=test_sheet_id,
+                        body={"requests": format_requests}
+                    ).execute()
+                    logger.info("Applied 0.00 format to GG Gain columns (G, H, I) in Facility_Data tab")
+                except Exception as fmt_err:
+                    logger.warning(f"Could not apply number format to GG Gain columns: {fmt_err}")
+
             return True
             
         except HttpError as e:
@@ -1012,6 +1045,14 @@ class GoogleSheetsService:
             logger.error(traceback.format_exc())
             return False
     
+    def _get_sheet_id(self, spreadsheet_id: str, sheet_name: str) -> int:
+        """Return the numeric sheetId for a named tab (needed for batchUpdate range specs)."""
+        meta = self.sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        for s in meta.get("sheets", []):
+            if s["properties"]["title"] == sheet_name:
+                return s["properties"]["sheetId"]
+        raise ValueError(f"Sheet '{sheet_name}' not found in spreadsheet {spreadsheet_id}")
+
     def _column_index_to_letter(self, col_idx: int) -> str:
         """Convert 0-based column index to Excel column letter (A, B, ..., Z, AA, AB, ...)"""
         result = ""
