@@ -237,6 +237,14 @@ def process_patient_data(patient_df):
     if 'days' in patient_df.columns:
         patient_df = patient_df.rename(columns={'days': 'LOS'})
         print("[OK] Renamed 'days' column to 'LOS'")
+
+    # Coerce LOS to numeric — OCR sometimes produces concatenated strings
+    if 'LOS' in patient_df.columns:
+        before = patient_df['LOS'].isna().sum()
+        patient_df['LOS'] = pd.to_numeric(patient_df['LOS'], errors='coerce')
+        after = patient_df['LOS'].isna().sum()
+        if after > before:
+            print(f"[WARN] {after - before} LOS value(s) could not be parsed as numeric and were set to NaN")
     
     print(f"Patient data shape: {patient_df.shape}")
     print(f"Patient columns: {list(patient_df.columns)}")
@@ -503,18 +511,25 @@ def _calculate_summary_metrics(df):
     total_visits = df['Number of Visits by Puzzle Provider'].sum() if 'Number of Visits by Puzzle Provider' in df.columns else 0
     avg_visits_per_patient = total_visits / patients_served if patients_served > 0 else 0
 
-    # LOS metrics
-    los_avg = df['LOS'].mean() if 'LOS' in df.columns and patients_served > 0 else 0
+    # LOS metrics (coerce to numeric to guard against OCR-concatenated strings)
+    los_col = pd.to_numeric(df['LOS'], errors='coerce') if 'LOS' in df.columns else None
+    los_avg = los_col.mean() if los_col is not None and patients_served > 0 else 0
+    if pd.isna(los_avg):
+        los_avg = 0
     los_managed_avg = 0
     los_medicare_avg = 0
     managed_care_count = 0
     medicare_a_count = 0
 
-    if 'LOS' in df.columns and 'Payer Type' in df.columns:
-        managed_care_data = df[df['Payer Type'] == 'Managed Care']['LOS']
-        medicare_data = df[df['Payer Type'] == 'Medicare A']['LOS']
+    if los_col is not None and 'Payer Type' in df.columns:
+        managed_care_data = los_col[df['Payer Type'] == 'Managed Care']
+        medicare_data = los_col[df['Payer Type'] == 'Medicare A']
         los_managed_avg = managed_care_data.mean() if len(managed_care_data) > 0 else 0
         los_medicare_avg = medicare_data.mean() if len(medicare_data) > 0 else 0
+        if pd.isna(los_managed_avg):
+            los_managed_avg = 0
+        if pd.isna(los_medicare_avg):
+            los_medicare_avg = 0
         managed_care_count = len(df[df['Payer Type'] == 'Managed Care'])
         medicare_a_count = len(df[df['Payer Type'] == 'Medicare A'])
 
