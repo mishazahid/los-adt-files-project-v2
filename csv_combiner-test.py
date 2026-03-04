@@ -522,8 +522,12 @@ def _calculate_summary_metrics(df):
     medicare_a_count = 0
 
     if los_col is not None and 'Payer Type' in df.columns:
+        def _is_medicare_a(payer):
+            p = str(payer).lower()
+            return 'medicare' in p or 'msho' in p
+        medicare_mask = df['Payer Type'].apply(_is_medicare_a)
         managed_care_data = los_col[df['Payer Type'] == 'Managed Care']
-        medicare_data = los_col[df['Payer Type'] == 'Medicare A']
+        medicare_data = los_col[medicare_mask]
         los_managed_avg = managed_care_data.mean() if len(managed_care_data) > 0 else 0
         los_medicare_avg = medicare_data.mean() if len(medicare_data) > 0 else 0
         if pd.isna(los_managed_avg):
@@ -531,7 +535,7 @@ def _calculate_summary_metrics(df):
         if pd.isna(los_medicare_avg):
             los_medicare_avg = 0
         managed_care_count = len(df[df['Payer Type'] == 'Managed Care'])
-        medicare_a_count = len(df[df['Payer Type'] == 'Medicare A'])
+        medicare_a_count = int(medicare_mask.sum())
 
     # Discharge mapping
     discharge_mapping = []
