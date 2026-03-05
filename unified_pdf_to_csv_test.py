@@ -319,20 +319,27 @@ def parse_with_python(text, metadata_text):
     # Extract metadata
     metadata = extract_metadata_from_text(metadata_text)
     
-    # Known facility types
+    # Known facility types (matched case-insensitively)
+    # Longer/more-specific strings FIRST to avoid partial matches
     facility_types = [
-        'Acute care hospital',
-        'Funeral Home',
-        'Nursing home',
         'Private home/apt. with home health services',
         'Private home/apt. with no home health services',
-        'Home with Hospice',
         'Board and care/assisted living/group home',
+        'Assisted Living with Home Care Services',
+        'Psychiatric hospital, MR/DD facility',
+        'Another nursing home or swing bed',
+        'Long term care hospital',
+        'Rehabilitation hospital',
         'Other Health Facility',
+        'Assisted Living',
+        'Acute care hospital',
+        'Against medical advice',
+        'Home with Hospice',
+        'Nursing home',
+        'Funeral Home',
+        'Home',
         'Other',
         'Unknown',
-        'Psychiatric hospital, MR/DD facility',
-        'Rehabilitation hospital'
     ]
     
     # Parse Admissions section
@@ -615,7 +622,7 @@ def parse_section_with_python(lines, section_start, section_end, section_name, k
             continue
         
         # Special case: "Unknown" type (e.g., "Unknown Workman, Rodney (202745) 08/20/2025")
-        if line.startswith('Unknown '):
+        if line.lower().startswith('unknown '):
             # Check if it's followed by a patient pattern
             unknown_remaining = line[8:].strip()  # Skip "Unknown "
             patient_info = extract_patient_from_line(unknown_remaining)
@@ -641,10 +648,11 @@ def parse_section_with_python(lines, section_start, section_end, section_name, k
                 i += 1
                 continue
         
-        # Check if line starts with a facility type
+        # Check if line starts with a facility type (case-insensitive)
         matched_type = None
+        line_lower = line.lower()
         for facility_type in facility_types:
-            if line.startswith(facility_type):
+            if line_lower.startswith(facility_type.lower()):
                 matched_type = facility_type
                 break
         

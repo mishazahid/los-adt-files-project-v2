@@ -527,8 +527,11 @@ def _calculate_summary_metrics(df):
             return 'medicare' in p or 'msho' in p
         medicare_mask = df['Payer Type'].apply(_is_medicare_a)
         managed_care_data = los_col[df['Payer Type'] == 'Managed Care']
+        # Cap MC LOS at 30 days for averaging — MC authorizations rarely exceed 30 days;
+        # any days beyond that are typically under a different payer (Medicaid/self-pay).
+        managed_care_data_capped = managed_care_data.clip(upper=30)
         medicare_data = los_col[medicare_mask]
-        los_managed_avg = managed_care_data.mean() if len(managed_care_data) > 0 else 0
+        los_managed_avg = managed_care_data_capped.mean() if len(managed_care_data_capped) > 0 else 0
         los_medicare_avg = medicare_data.mean() if len(medicare_data) > 0 else 0
         if pd.isna(los_managed_avg):
             los_managed_avg = 0
@@ -538,6 +541,7 @@ def _calculate_summary_metrics(df):
         medicare_a_count = int(medicare_mask.sum())
 
     # Discharge mapping
+    # Order matters: check specific types before generic ones
     discharge_mapping = []
     if 'to_type' in df.columns:
         for to_type in df['to_type'].fillna('Custodial'):
@@ -546,16 +550,29 @@ def _calculate_summary_metrics(df):
                 discharge_mapping.append('Custodial')
             elif 'custodial' in to_type_str:
                 discharge_mapping.append('Custodial')
-            elif 'hospital' in to_type_str:
-                discharge_mapping.append('Hospital Transfer')
             elif 'funeral' in to_type_str:
                 discharge_mapping.append('Expired')
-            elif ('board and care/assisted living/group home' in to_type_str or
-                  'board and care' in to_type_str or
+            # Another Nursing Home / LTAC — check BEFORE 'hospital' so
+            # "Long term care hospital" maps here, not Hospital Transfer
+            elif ('nursing home' in to_type_str or
+                  'swing bed' in to_type_str or
+                  'long term care' in to_type_str or
+                  'ltac' in to_type_str or
+                  'ltch' in to_type_str):
+                discharge_mapping.append('SNF')
+            # Hospital Transfer (acute care, rehab, psychiatric)
+            elif 'hospital' in to_type_str:
+                discharge_mapping.append('Hospital Transfer')
+            # Against Medical Advice → Other
+            elif ('against medical advice' in to_type_str or
+                  to_type_str == 'ama'):
+                discharge_mapping.append('Other')
+            # Assisted Living (board and care, ALF, group home)
+            elif ('board and care' in to_type_str or
                   'assisted living' in to_type_str or
-                  ('assisted' in to_type_str and 'living' not in to_type_str) or
                   'group home' in to_type_str):
                 discharge_mapping.append('Assisted Living')
+            # Home discharges
             elif 'home' in to_type_str and 'no' in to_type_str and 'funeral' not in to_type_str:
                 discharge_mapping.append('Home Discharge No')
             elif 'home' in to_type_str and 'funeral' not in to_type_str:

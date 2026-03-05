@@ -327,13 +327,24 @@ def normalize_payer_types(data):
         medicare_a_count = 0
         managed_care_count = 0
         
+        medicaid_count = 0
+
         for patient in patients:
             payer_type = patient.get('payer_type', '').strip()
-            
-            # Keep 'Medicare A' as is (case-insensitive), change all others to 'Managed Care'
-            if payer_type.lower() == 'medicare a':
+            payer_lower = payer_type.lower()
+
+            # Keep 'Medicare A' as is (case-insensitive)
+            if payer_lower == 'medicare a':
                 normalized_payer_type = 'Medicare A'
                 medicare_a_count += 1
+            # Separate Medicaid (long-term care payer) from Managed Care
+            elif ('medicaid' in payer_lower or
+                  'medical assistance' in payer_lower or
+                  payer_lower == 'medi-cal' or
+                  payer_lower == 'title xix' or
+                  payer_lower == 'title 19'):
+                normalized_payer_type = 'Medicaid'
+                medicaid_count += 1
             else:
                 normalized_payer_type = 'Managed Care'
                 managed_care_count += 1
@@ -348,7 +359,7 @@ def normalize_payer_types(data):
             
             normalized_data["patients"].append(normalized_patient)
         
-        print(f"Normalized payer types: {medicare_a_count} 'Medicare A', {managed_care_count} changed to 'Managed Care'")
+        print(f"Normalized payer types: {medicare_a_count} 'Medicare A', {managed_care_count} 'Managed Care', {medicaid_count} 'Medicaid'")
         
         return normalized_data
         
