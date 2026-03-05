@@ -550,7 +550,7 @@ def _calculate_summary_metrics(df):
                 discharge_mapping.append('Custodial')
             elif 'custodial' in to_type_str:
                 discharge_mapping.append('Custodial')
-            elif 'funeral' in to_type_str:
+            elif 'funeral' in to_type_str or 'deceased' in to_type_str:
                 discharge_mapping.append('Expired')
             # Another Nursing Home / LTAC — check BEFORE 'hospital' so
             # "Long term care hospital" maps here, not Hospital Transfer
