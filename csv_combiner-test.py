@@ -591,6 +591,7 @@ def _calculate_summary_metrics(df):
     total_custodial = discharge_mapping.count('Custodial')
     total_assisted_living = discharge_mapping.count('Assisted Living')
     total_other = discharge_mapping.count('Other')
+    total_snf = discharge_mapping.count('SNF')
 
     hd_ratio = f"{total_home_discharge}:{patients_served}" if patients_served > 0 else "0:0"
     hdn_ratio = f"{total_home_discharge_no}:{patients_served}" if patients_served > 0 else "0:0"
@@ -599,7 +600,7 @@ def _calculate_summary_metrics(df):
     cus_ratio = f"{total_custodial}:{patients_served}" if patients_served > 0 else "0:0"
     al_ratio = f"{total_assisted_living}:{patients_served}" if patients_served > 0 else "0:0"
     ot_ratio = f"{total_other}:{patients_served}" if patients_served > 0 else "0:0"
-    snf_ratio = "0:0"
+    snf_ratio = f"{total_snf}:{patients_served}" if patients_served > 0 else "0:0"
 
     pct_home_discharge = (total_home_discharge / patients_served * 100) if patients_served > 0 else 0
     pct_home_discharge_no = (total_home_discharge_no / patients_served * 100) if patients_served > 0 else 0
@@ -608,7 +609,7 @@ def _calculate_summary_metrics(df):
     pct_custodial = (total_custodial / patients_served * 100) if patients_served > 0 else 0
     pct_assisted_living = (total_assisted_living / patients_served * 100) if patients_served > 0 else 0
     pct_other = (total_other / patients_served * 100) if patients_served > 0 else 0
-    pct_snf = 0
+    pct_snf = (total_snf / patients_served * 100) if patients_served > 0 else 0
 
     return {
         'patients_served': patients_served,
